@@ -41,7 +41,7 @@ export class SWRequestResultParams {
     if (responsed && responsed.responseHeaders) {
       let s = "";
       for (const h of responsed.responseHeaders) {
-        s += `${h.name}: ${h.value}\n`;
+        s += `${h.name}: ${h.value}\r\n`; // TM兼容: \r\n
       }
       this.resultParamResponseHeader = s;
       responsed.responseHeaders = null; // 设为 null 避免重复处理
