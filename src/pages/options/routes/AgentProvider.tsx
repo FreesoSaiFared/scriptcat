@@ -43,6 +43,31 @@ const emptyModel: AgentModelConfig = {
   model: "",
 };
 
+const webAgentTargets = [
+  { value: "chatgpt", label: "ChatGPT" },
+  { value: "gemini", label: "Gemini" },
+  { value: "claude", label: "Claude" },
+] as const;
+
+const webAgentTransports = [
+  { value: "tab-dom", label: "Tab DOM" },
+  { value: "cdp", label: "CDP" },
+  { value: "local-bridge", label: "Local Bridge" },
+] as const;
+
+function normalizeModelForSave(model: AgentModelConfig): AgentModelConfig {
+  if (model.provider !== "webagent") return model;
+  const target = model.target || (model.model === "gemini" || model.model === "claude" ? model.model : "chatgpt");
+  return {
+    ...model,
+    apiBaseUrl: "",
+    apiKey: "",
+    model: target,
+    target,
+    transport: model.transport || "tab-dom",
+  };
+}
+
 function ModelCard({
   model,
   isDefault,
@@ -321,14 +346,15 @@ function AgentProvider() {
   };
 
   const handleModalOk = async () => {
-    if (!editingModel.name || !editingModel.model) {
+    const modelToSave = normalizeModelForSave(editingModel);
+    if (!modelToSave.name || !modelToSave.model) {
       Message.error(t("agent_model_name") + " / " + t("agent_provider_model") + " required");
       return;
     }
     if (isEditing) {
-      await agentClient.saveModel(editingModel);
+      await agentClient.saveModel(modelToSave);
     } else {
-      const newModel = { ...editingModel, id: uuidv4() };
+      const newModel = { ...modelToSave, id: uuidv4() };
       await agentClient.saveModel(newModel);
       // 如果是第一个模型，自动设为默认
       if (models.length === 0) {
@@ -345,12 +371,17 @@ function AgentProvider() {
         return "https://api.anthropic.com";
       case "zhipu":
         return "https://open.bigmodel.cn/api/paas/v4";
+      case "webagent":
+        return "";
       default:
         return "https://api.openai.com/v1";
     }
   };
 
   const buildProviderRequest = (m: AgentModelConfig) => {
+    if (m.provider === "webagent") {
+      throw new Error("WebAgent uses browser sessions and does not fetch API model lists");
+    }
     const baseUrl = m.apiBaseUrl || getDefaultBaseUrl(m.provider);
     const headers: Record<string, string> = {};
     let modelsUrl: string;
@@ -387,6 +418,9 @@ function AgentProvider() {
           max_tokens: 256,
           messages: [{ role: "user", content: "hi" }],
         });
+      } else if (editingModel.provider === "webagent") {
+        setTestReply("WebAgent uses logged-in browser tabs; no API key test is required.");
+        return;
       } else {
         chatUrl = `${baseUrl}/chat/completions`;
         if (editingModel.apiKey) {
@@ -508,6 +542,7 @@ function AgentProvider() {
                   openai: "OpenAI",
                   anthropic: "Anthropic",
                   zhipu: "Zhipu (智谱)",
+                  webagent: "WebAgent",
                 };
                 return (
                   <span className="tw-inline-flex tw-items-center tw-gap-2">
@@ -518,6 +553,7 @@ function AgentProvider() {
               }}
             >
               {[
+                { value: "webagent", label: "WebAgent" },
                 { value: "openai", label: "OpenAI" },
                 { value: "anthropic", label: "Anthropic" },
                 { value: "zhipu", label: "Zhipu (智谱)" },
@@ -532,43 +568,96 @@ function AgentProvider() {
             </Select>
           </div>
 
-          {/* API Base URL */}
-          <div>
-            <div className="tw-text-sm tw-font-medium tw-mb-2 tw-text-[var(--color-text-2)]">
-              {t("agent_provider_api_base_url")}
-            </div>
-            <Input
-              value={editingModel.apiBaseUrl}
-              placeholder={getDefaultBaseUrl(editingModel.provider)}
-              onChange={(value) => setEditingModel((prev) => ({ ...prev, apiBaseUrl: value }))}
-            />
-          </div>
+          {editingModel.provider === "webagent" ? (
+            <>
+              <div>
+                <div className="tw-text-sm tw-font-medium tw-mb-2 tw-text-[var(--color-text-2)]">
+                  {"WebAgent target"}
+                </div>
+                <Select
+                  value={editingModel.target || editingModel.model || "chatgpt"}
+                  onChange={(value) =>
+                    setEditingModel((prev) => ({
+                      ...prev,
+                      target: value,
+                      model: value,
+                      apiBaseUrl: "",
+                      apiKey: "",
+                    }))
+                  }
+                >
+                  {webAgentTargets.map((item) => (
+                    <Select.Option key={item.value} value={item.value}>
+                      {item.label}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
 
-          {/* API Key */}
-          <div>
-            <div className="tw-text-sm tw-font-medium tw-mb-2 tw-text-[var(--color-text-2)]">{"API Key"}</div>
-            <Input.Password
-              value={editingModel.apiKey}
-              onChange={(value) => setEditingModel((prev) => ({ ...prev, apiKey: value }))}
-            />
-          </div>
+              <div>
+                <div className="tw-text-sm tw-font-medium tw-mb-2 tw-text-[var(--color-text-2)]">
+                  {"WebAgent transport"}
+                </div>
+                <Select
+                  value={editingModel.transport || "tab-dom"}
+                  onChange={(value) => setEditingModel((prev) => ({ ...prev, transport: value }))}
+                >
+                  {webAgentTransports.map((item) => (
+                    <Select.Option key={item.value} value={item.value}>
+                      {item.label}
+                    </Select.Option>
+                  ))}
+                </Select>
+                <Typography.Text type="secondary" className="tw-block tw-mt-1" style={{ fontSize: 12 }}>
+                  {
+                    "Browser-session WebAgent does not require an API key. Site selectors belong in drivers/userscripts."
+                  }
+                </Typography.Text>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* API Base URL */}
+              <div>
+                <div className="tw-text-sm tw-font-medium tw-mb-2 tw-text-[var(--color-text-2)]">
+                  {t("agent_provider_api_base_url")}
+                </div>
+                <Input
+                  value={editingModel.apiBaseUrl}
+                  placeholder={getDefaultBaseUrl(editingModel.provider)}
+                  onChange={(value) => setEditingModel((prev) => ({ ...prev, apiBaseUrl: value }))}
+                />
+              </div>
+
+              {/* API Key */}
+              <div>
+                <div className="tw-text-sm tw-font-medium tw-mb-2 tw-text-[var(--color-text-2)]">{"API Key"}</div>
+                <Input.Password
+                  value={editingModel.apiKey}
+                  onChange={(value) => setEditingModel((prev) => ({ ...prev, apiKey: value }))}
+                />
+              </div>
+            </>
+          )}
 
           {/* 模型 */}
-          <div>
-            <div className="tw-text-sm tw-font-medium tw-mb-2 tw-text-[var(--color-text-2)]">
-              {t("agent_provider_model")}
+          {editingModel.provider !== "webagent" && (
+            <div>
+              <div className="tw-text-sm tw-font-medium tw-mb-2 tw-text-[var(--color-text-2)]">
+                {t("agent_provider_model")}
+              </div>
+              <div className="tw-flex tw-gap-2">
+                <FetchedModelSelect
+                  availableModels={availableModels}
+                  value={editingModel.model || undefined}
+                  onChange={(value) => setEditingModel((prev) => ({ ...prev, model: value || "" }))}
+                />
+                <Button type="outline" loading={fetchingModels} onClick={handleFetchModels}>
+                  {t("agent_model_fetch")}
+                </Button>
+              </div>
             </div>
-            <div className="tw-flex tw-gap-2">
-              <FetchedModelSelect
-                availableModels={availableModels}
-                value={editingModel.model || undefined}
-                onChange={(value) => setEditingModel((prev) => ({ ...prev, model: value || "" }))}
-              />
-              <Button type="outline" loading={fetchingModels} onClick={handleFetchModels}>
-                {t("agent_model_fetch")}
-              </Button>
-            </div>
-          </div>
+          )}
 
           {/* Max Tokens */}
           <div>
@@ -620,28 +709,30 @@ function AgentProvider() {
           </div>
 
           {/* 测试连接 */}
-          <div className="tw-flex tw-items-center tw-gap-3 tw-pt-2">
-            <div
-              className="tw-flex-1 tw-min-w-0 tw-max-h-[4.5em] tw-overflow-y-auto tw-leading-[1.5]"
-              style={{ scrollbarWidth: "thin" }}
-            >
-              {testReply && (
-                <Typography.Text
-                  className="tw-text-sm tw-break-all"
-                  style={{
-                    color: testReply.startsWith(t("agent_provider_test_failed") as string)
-                      ? "var(--color-danger-6)"
-                      : "var(--color-success-6)",
-                  }}
-                >
-                  {testReply}
-                </Typography.Text>
-              )}
+          {editingModel.provider !== "webagent" && (
+            <div className="tw-flex tw-items-center tw-gap-3 tw-pt-2">
+              <div
+                className="tw-flex-1 tw-min-w-0 tw-max-h-[4.5em] tw-overflow-y-auto tw-leading-[1.5]"
+                style={{ scrollbarWidth: "thin" }}
+              >
+                {testReply && (
+                  <Typography.Text
+                    className="tw-text-sm tw-break-all"
+                    style={{
+                      color: testReply.startsWith(t("agent_provider_test_failed") as string)
+                        ? "var(--color-danger-6)"
+                        : "var(--color-success-6)",
+                    }}
+                  >
+                    {testReply}
+                  </Typography.Text>
+                )}
+              </div>
+              <Button type="outline" loading={testingConnection} onClick={handleTestConnection}>
+                {t("agent_provider_test_connection")}
+              </Button>
             </div>
-            <Button type="outline" loading={testingConnection} onClick={handleTestConnection}>
-              {t("agent_provider_test_connection")}
-            </Button>
-          </div>
+          )}
         </Space>
       </Modal>
     </Space>

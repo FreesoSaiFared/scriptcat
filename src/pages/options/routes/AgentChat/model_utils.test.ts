@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  detectProvider,
   supportsImageOutputByModelId,
   supportsImageOutput,
   supportsVisionByModelId,
@@ -109,5 +110,20 @@ describe("用户手动标记能力优先于自动检测", () => {
     // 未设置时回退到自动检测
     expect(supportsImageOutput(makeModel("gpt-4o"))).toBe(true);
     expect(supportsImageOutput(makeModel("gemini-3-flash-preview"))).toBe(false);
+  });
+});
+
+describe("detectProvider", () => {
+  it.concurrent("recognizes WebAgent as a first-class browser-session provider", () => {
+    expect(
+      detectProvider(
+        makeModel("chatgpt", {
+          provider: "webagent",
+          target: "chatgpt",
+          transport: "tab-dom",
+          apiKey: "",
+        })
+      )
+    ).toEqual({ key: "webagent", label: "WebAgent", order: 0 });
   });
 });

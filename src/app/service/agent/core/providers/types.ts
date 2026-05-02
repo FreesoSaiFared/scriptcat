@@ -30,6 +30,15 @@ export interface LLMProvider {
   /** 构建 fetch 请求所需的 url 与 RequestInit */
   buildRequest(input: ProviderBuildRequestInput): ProviderBuildRequestOutput | Promise<ProviderBuildRequestOutput>;
 
+  /**
+   * 可选直接执行入口。
+   *
+   * Browser-session providers such as WebAgent do not necessarily have an HTTP
+   * API endpoint or API key. When present, LLMClient uses this hook instead of
+   * fetch/buildRequest while preserving the same ChatStreamEvent contract.
+   */
+  execute?(input: ProviderBuildRequestInput, onEvent: ProviderStreamEventHandler, signal: AbortSignal): Promise<void>;
+
   /** 解析 SSE 流式响应，通过 onEvent 推送 ChatStreamEvent */
   parseStream(
     reader: ReadableStreamDefaultReader<Uint8Array>,

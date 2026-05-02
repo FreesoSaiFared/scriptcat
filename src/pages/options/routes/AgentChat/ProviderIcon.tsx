@@ -12,6 +12,7 @@ const providerIcons: Record<string, { icon: IconType; color: string }> = {
 
 // 没有 react-icons 的供应商用文字缩写
 const providerTextIcons: Record<string, { text: string; color: string }> = {
+  webagent: { text: "WA", color: "#7c3aed" },
   deepseek: { text: "DS", color: "#4d6bfe" },
   mistral: { text: "M", color: "#ff7000" },
   groq: { text: "G", color: "#f55036" },

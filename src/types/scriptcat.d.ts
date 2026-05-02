@@ -1467,12 +1467,16 @@ declare namespace CATAgentModel {
     id: string;
     /** User-defined display name (e.g. "GPT-4o", "Claude Sonnet"). */
     name: string;
-    /** LLM provider. */
-    provider: "openai" | "anthropic";
+    /** LLM provider. API providers are optional compatibility providers; webagent uses logged-in browser sessions. */
+    provider: "openai" | "anthropic" | "zhipu" | "webagent";
     /** API base URL. */
     apiBaseUrl: string;
     /** Model identifier sent to the provider API. */
     model: string;
+    /** WebAgent target tab/site, when provider is "webagent". */
+    target?: "chatgpt" | "gemini" | "claude";
+    /** WebAgent transport, when provider is "webagent". */
+    transport?: "tab-dom" | "cdp" | "local-bridge";
     /** Maximum output tokens; omitted if unset. */
     maxTokens?: number;
   }

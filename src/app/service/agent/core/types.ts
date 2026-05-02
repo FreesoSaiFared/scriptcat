@@ -179,13 +179,21 @@ export type ChatRequest = {
 
 // ---- Agent 模型配置 ----
 
+export type AgentModelProvider = "openai" | "anthropic" | "zhipu" | "webagent";
+
+export type WebAgentTarget = "chatgpt" | "gemini" | "claude";
+export type WebAgentTransport = "tab-dom" | "cdp" | "local-bridge";
+
 export type AgentModelConfig = {
   id: string; // 唯一标识
   name: string; // 用户自定义名称（如 "GPT-4o", "Claude Sonnet"）
-  provider: "openai" | "anthropic" | "zhipu";
+  provider: AgentModelProvider;
   apiBaseUrl: string;
   apiKey: string;
   model: string;
+  target?: WebAgentTarget; // WebAgent 目标站点（浏览器会话 provider 使用）
+  transport?: WebAgentTransport; // WebAgent 驱动传输方式
+  mockResponse?: string; // WebAgent 测试/本地 mock 驱动响应，不用于真实站点选择器
   maxTokens?: number; // 最大输出 token 数，不设置则由 API 端决定
   contextWindow?: number; // 最大上下文 token 数（输入+输出），如 128000、200000
   availableModels?: string[]; // 缓存从 API 获取的可用模型列表

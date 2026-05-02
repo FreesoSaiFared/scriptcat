@@ -53,76 +53,81 @@ export class LLMClient {
     if (!provider) {
       throw new Error(`Unsupported LLM provider: ${model.provider}`);
     }
-    const { url, init } = await provider.buildRequest({
+
+    const providerInput = {
       model,
       request: chatRequest,
       resolver: attachmentResolver,
-    });
+    };
 
-    // 带重试的 LLM 调用，最多重试 5 次，间隔递增：10s, 10s, 20s, 20s, 30s
-    const RETRY_DELAYS = [10_000, 10_000, 20_000, 20_000, 30_000];
-    const MAX_RETRIES = RETRY_DELAYS.length;
-    let response!: Response;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        response = await fetch(url, { ...init, signal });
+    const runHttpProviderStream = async (onEvent: (event: ChatStreamEvent) => void) => {
+      const { url, init } = await provider.buildRequest(providerInput);
 
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => "");
-          let errorMessage = `API error: ${response.status}`;
-          try {
-            const errorJson = JSON.parse(errorText);
-            errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
-          } catch {
-            if (errorText) errorMessage += ` - ${errorText.slice(0, 200)}`;
+      // 带重试的 LLM 调用，最多重试 5 次，间隔递增：10s, 10s, 20s, 20s, 30s
+      const RETRY_DELAYS = [10_000, 10_000, 20_000, 20_000, 30_000];
+      const MAX_RETRIES = RETRY_DELAYS.length;
+      let response!: Response;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          response = await fetch(url, { ...init, signal });
+
+          if (!response.ok) {
+            const errorText = await response.text().catch(() => "");
+            let errorMessage = `API error: ${response.status}`;
+            try {
+              const errorJson = JSON.parse(errorText);
+              errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
+            } catch {
+              if (errorText) errorMessage += ` - ${errorText.slice(0, 200)}`;
+            }
+            throw new Error(errorMessage);
           }
-          throw new Error(errorMessage);
-        }
 
-        if (!response.body) {
-          throw new Error("No response body");
-        }
-        // 请求成功，跳出重试循环
-        break;
-      } catch (e: any) {
-        // 用户取消时直接抛出，不重试
-        if (signal.aborted) throw e;
-        // 4xx 客户端错误（除 408/425/429 外）不重试，立即抛出
-        const m = (e.message || "").match(/API error:\s*(\d{3})/);
-        if (m) {
-          const code = Number(m[1]);
-          if (code >= 400 && code < 500 && code !== 408 && code !== 425 && code !== 429) {
-            throw e;
+          if (!response.body) {
+            throw new Error("No response body");
           }
+          // 请求成功，跳出重试循环
+          break;
+        } catch (e: any) {
+          // 用户取消时直接抛出，不重试
+          if (signal.aborted) throw e;
+          // 4xx 客户端错误（除 408/425/429 外）不重试，立即抛出
+          const m = (e.message || "").match(/API error:\s*(\d{3})/);
+          if (m) {
+            const code = Number(m[1]);
+            if (code >= 400 && code < 500 && code !== 408 && code !== 425 && code !== 429) {
+              throw e;
+            }
+          }
+          // 已用完所有重试次数
+          if (attempt >= MAX_RETRIES) throw e;
+          // 向 UI 发送重试通知（含延迟时间，用于倒计时显示）
+          const delayMs = RETRY_DELAYS[attempt];
+          sendEvent({
+            type: "retry",
+            attempt: attempt + 1,
+            maxRetries: MAX_RETRIES,
+            error: e.message || "Unknown error",
+            delayMs,
+          });
+          // 等待后重试，等待期间可被 abort 取消；resolve 时移除监听器避免泄漏
+          await new Promise<void>((resolve, reject) => {
+            const onAbort = () => {
+              clearTimeout(timer);
+              reject(new Error("Aborted during retry wait"));
+            };
+            const timer = setTimeout(() => {
+              signal.removeEventListener("abort", onAbort);
+              resolve();
+            }, delayMs);
+            signal.addEventListener("abort", onAbort, { once: true });
+          });
         }
-        // 已用完所有重试次数
-        if (attempt >= MAX_RETRIES) throw e;
-        // 向 UI 发送重试通知（含延迟时间，用于倒计时显示）
-        const delayMs = RETRY_DELAYS[attempt];
-        sendEvent({
-          type: "retry",
-          attempt: attempt + 1,
-          maxRetries: MAX_RETRIES,
-          error: e.message || "Unknown error",
-          delayMs,
-        });
-        // 等待后重试，等待期间可被 abort 取消；resolve 时移除监听器避免泄漏
-        await new Promise<void>((resolve, reject) => {
-          const onAbort = () => {
-            clearTimeout(timer);
-            reject(new Error("Aborted during retry wait"));
-          };
-          const timer = setTimeout(() => {
-            signal.removeEventListener("abort", onAbort);
-            resolve();
-          }, delayMs);
-          signal.addEventListener("abort", onAbort, { once: true });
-        });
       }
-    }
 
-    const reader = response.body!.getReader();
-    const parseStream = provider.parseStream.bind(provider);
+      const reader = response.body!.getReader();
+      await provider.parseStream(reader, onEvent, signal);
+    };
 
     // 收集响应
     let content = "";
@@ -243,7 +248,11 @@ export class LLMClient {
         }
       };
 
-      parseStream(reader, onEvent, signal).catch(reject);
+      const runProviderStream = provider.execute
+        ? () => provider.execute!(providerInput, onEvent, signal)
+        : () => runHttpProviderStream(onEvent);
+
+      runProviderStream().catch(reject);
     });
   }
 }

@@ -1,6 +1,7 @@
 import type { LLMProvider } from "./types";
 import { openaiProvider, buildOpenAIRequest, parseOpenAIStream } from "./openai";
 import { anthropicProvider } from "./anthropic";
+import { webagentProvider } from "./webagent";
 
 /** LLM Provider 注册表，支持按 provider 名称查找实现 */
 export class ProviderRegistry {
@@ -33,6 +34,7 @@ export const providerRegistry = new ProviderRegistry();
 // 避免 bundler 对纯副作用导入的 tree-shake）
 providerRegistry.register(openaiProvider);
 providerRegistry.register(anthropicProvider);
+providerRegistry.register(webagentProvider);
 
 /**
  * 智谱 AI（GLM 系列）Provider。

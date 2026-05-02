@@ -9,6 +9,10 @@ export type ProviderInfo = {
 
 // 通过模型名称或 API Base URL 推断供应商
 export function detectProvider(model: AgentModelConfig): ProviderInfo {
+  if (model.provider === "webagent") {
+    return { key: "webagent", label: "WebAgent", order: 0 };
+  }
+
   const m = model.model.toLowerCase();
   const url = model.apiBaseUrl.toLowerCase();
 
@@ -127,6 +131,7 @@ export function detectProviderByModelId(modelId: string): ProviderInfo {
     return { key: "openai", label: "OpenAI", order: 1 };
   }
   if (m.startsWith("claude-")) return { key: "anthropic", label: "Anthropic", order: 2 };
+  if (m === "chatgpt" || m === "gemini" || m === "claude") return { key: "webagent", label: "WebAgent", order: 0 };
   if (m.startsWith("gemini")) return { key: "google", label: "Google", order: 3 };
   if (m.startsWith("deepseek")) return { key: "deepseek", label: "DeepSeek", order: 4 };
   if (m.includes("llama")) return { key: "meta", label: "Meta", order: 5 };

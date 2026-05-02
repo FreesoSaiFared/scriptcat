@@ -1474,12 +1474,16 @@ declare namespace CATAgentModel {
     id: string;
     /** 用户自定义显示名称（如 "GPT-4o"、"Claude Sonnet"）。 */
     name: string;
-    /** LLM 提供商。 */
-    provider: "openai" | "anthropic";
+    /** LLM 提供商。API 提供商是可选兼容提供商；webagent 使用已登录浏览器会话。 */
+    provider: "openai" | "anthropic" | "zhipu" | "webagent";
     /** API 基础 URL。 */
     apiBaseUrl: string;
     /** 发送给提供商 API 的模型标识符。 */
     model: string;
+    /** WebAgent 目标标签页/站点（provider 为 "webagent" 时）。 */
+    target?: "chatgpt" | "gemini" | "claude";
+    /** WebAgent 传输方式（provider 为 "webagent" 时）。 */
+    transport?: "tab-dom" | "cdp" | "local-bridge";
     /** 最大输出 tokens；未设置时省略。 */
     maxTokens?: number;
   }

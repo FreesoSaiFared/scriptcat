@@ -57,3 +57,14 @@ describe("ProviderRegistry", () => {
     expect(registry.listNames()).toEqual([]);
   });
 });
+
+describe("built-in provider registry", () => {
+  it("registers webagent alongside optional API compatibility providers", async () => {
+    const { providerRegistry } = await import("./registry.js");
+
+    expect(providerRegistry.has("openai")).toBe(true);
+    expect(providerRegistry.has("anthropic")).toBe(true);
+    expect(providerRegistry.has("zhipu")).toBe(true);
+    expect(providerRegistry.has("webagent")).toBe(true);
+  });
+});

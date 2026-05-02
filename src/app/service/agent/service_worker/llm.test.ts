@@ -87,6 +87,53 @@ describe("callLLM 流式响应解析", () => {
     expect(doneEvents[0].usage.outputTokens).toBe(5);
   });
 
+  it("WebAgent provider uses browser-session direct execution without apiKey or fetch", async () => {
+    const { service, mockRepo } = createTestService();
+    const { sender, sentMessages } = createMockSender();
+
+    (service as any).modelService.modelRepo = {
+      listModels: vi.fn().mockResolvedValue([
+        {
+          id: "webagent-chatgpt",
+          name: "ChatGPT Browser Session",
+          provider: "webagent",
+          apiBaseUrl: "",
+          apiKey: "",
+          model: "chatgpt",
+          target: "chatgpt",
+          transport: "tab-dom",
+          mockResponse: "Browser session response",
+        },
+      ]),
+      getModel: vi.fn().mockResolvedValue({
+        id: "webagent-chatgpt",
+        name: "ChatGPT Browser Session",
+        provider: "webagent",
+        apiBaseUrl: "",
+        apiKey: "",
+        model: "chatgpt",
+        target: "chatgpt",
+        transport: "tab-dom",
+        mockResponse: "Browser session response",
+      }),
+      getDefaultModelId: vi.fn().mockResolvedValue("webagent-chatgpt"),
+      saveModel: vi.fn(),
+      removeModel: vi.fn(),
+      setDefaultModelId: vi.fn(),
+    };
+
+    mockRepo.listConversations.mockResolvedValue([{ ...BASE_CONV, modelId: "webagent-chatgpt" }]);
+    mockRepo.getMessages.mockResolvedValue([]);
+    fetchSpy.mockRejectedValue(new Error("fetch should not be called for webagent"));
+
+    await (service as any).handleConversationChat({ conversationId: "conv-1", message: "hi" }, sender);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const events = sentMessages.map((m) => m.data);
+    expect(events).toContainEqual({ type: "content_delta", delta: "Browser session response" });
+    expect(events.filter((e: any) => e.type === "done")).toHaveLength(1);
+  });
+
   it("正常文本响应（Anthropic provider）：验证 buildAnthropicRequest + parseAnthropicStream", async () => {
     const { service, mockRepo } = createTestService();
     const { sender, sentMessages } = createMockSender();
