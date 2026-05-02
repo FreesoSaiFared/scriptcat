@@ -30,6 +30,18 @@ export type CATFileStorage = {
 
 type WithAsyncValue<T> = T | { asyncValue?: () => Promise<T> };
 
+const getWebStorage = () => {
+  const storage = globalThis.localStorage;
+  if (
+    storage &&
+    typeof storage.getItem === "function" &&
+    typeof storage.setItem === "function" &&
+    typeof storage.removeItem === "function"
+  ) {
+    return storage;
+  }
+};
+
 // typeof获取 SystemConfig 的所有方法，去掉 get/set 前缀，并把方法名的第一个字母改为小写
 // 修改为蛇形命名法
 
@@ -349,16 +361,18 @@ export class SystemConfig {
 
   // 获取typescript类型定义
   getEditorTypeDefinition(): string {
-    return localStorage.getItem("editor_type_definition") || defaultTypeDefinition;
+    return getWebStorage()?.getItem("editor_type_definition") || defaultTypeDefinition;
   }
 
   // 由于内容过大，只能存储到localStorage中
   setEditorTypeDefinition(v: string) {
+    const storage = getWebStorage();
+    if (!storage) return;
     if (v === "") {
-      delete localStorage["editor_type_definition"];
+      storage.removeItem("editor_type_definition");
       return;
     }
-    localStorage.setItem("editor_type_definition", v);
+    storage.setItem("editor_type_definition", v);
   }
 
   // 日志清理周期
@@ -393,8 +407,9 @@ export class SystemConfig {
   }
 
   async getLanguage() {
-    if (globalThis.localStorage) {
-      const cachedLanguage = localStorage.getItem("language");
+    const storage = getWebStorage();
+    if (storage) {
+      const cachedLanguage = storage.getItem("language");
       if (cachedLanguage) {
         return cachedLanguage;
       }
@@ -408,8 +423,9 @@ export class SystemConfig {
       },
     }).then((lng) => {
       // 设置进入缓存
-      if (globalThis.localStorage) {
-        localStorage.setItem("language", `${lng}`);
+      const storage = getWebStorage();
+      if (storage) {
+        storage.setItem("language", `${lng}`);
       }
       return lng;
     });
@@ -417,8 +433,9 @@ export class SystemConfig {
 
   setLanguage(value: string) {
     this._set("language", value);
-    if (globalThis.localStorage) {
-      localStorage.setItem("language", value);
+    const storage = getWebStorage();
+    if (storage) {
+      storage.setItem("language", value);
     }
   }
 
