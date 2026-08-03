@@ -6,7 +6,7 @@
   "license": "GPLv3",
   "private": true,
   "scripts": {
-    "preinstall": "pnpm dlx only-allow pnpm",
+    "preinstall": "corepack pnpm dlx only-allow pnpm",
     "prepare": "husky",
     "dev": "cross-env NODE_ENV=development rspack",
     "dev:react-devtools": "cross-env NODE_ENV=development REACT_DEVTOOLS=true rspack",
