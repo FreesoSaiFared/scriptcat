@@ -1,4 +1,4 @@
-name: TabWeaver source staging
+name: TabWeaver source and runtime staging
 
 on:
   push:
@@ -17,33 +17,74 @@ env:
 jobs:
   stage:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
       - name: Download pinned repositories through gh-proxy.com
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p source-archives
-          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 \
-            "$SCRIPTCAT_URL" -o source-archives/scriptcat-source.zip
-          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 \
-            "$PLAYCANVAS_URL" -o source-archives/playcanvas-engine.zip
-          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 \
-            "$GEOGEBRA_URL" -o source-archives/geogebra.zip
-      - name: Verify and record archives
+          mkdir -p source-archives source runtime
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$SCRIPTCAT_URL" -o source-archives/scriptcat-source.zip
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$PLAYCANVAS_URL" -o source-archives/playcanvas-engine.zip
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$GEOGEBRA_URL" -o source-archives/geogebra.zip
+          unzip -q source-archives/scriptcat-source.zip -d source
+          unzip -q source-archives/playcanvas-engine.zip -d source
+          unzip -q source-archives/geogebra.zip -d source
+          sha256sum source-archives/*.zip | tee source-archives/SHA256SUMS
+      - name: Build PlayCanvas ESM
         shell: bash
         run: |
           set -euxo pipefail
-          unzip -t source-archives/scriptcat-source.zip
-          unzip -t source-archives/playcanvas-engine.zip
-          unzip -t source-archives/geogebra.zip
-          sha256sum source-archives/*.zip | tee source-archives/SHA256SUMS
-          du -h source-archives/*
+          cd source/engine-*
+          npm ci --ignore-scripts
+          npm run build:rel:esm
+          mkdir -p ../../runtime/playcanvas
+          cp build/playcanvas.mjs ../../runtime/playcanvas/
+      - name: Build ScriptCat extension
+        shell: bash
+        run: |
+          set -euxo pipefail
+          corepack enable
+          corepack prepare pnpm@10.34.1 --activate
+          cd source/scriptcat-*
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm run build
+          cp -a dist/ext ../../runtime/scriptcat-extension
+      - name: Build GeoGebra WebSimple CAS
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd source/geogebra-*
+          ./gradlew -p source/web web:gwtCompile web:compileSass web:mergeDeploy -Pgmodule=org.geogebra.web.WebSimple --console=plain
+          mkdir -p ../../runtime/geogebra
+          cp -a source/web/web/war/webSimple ../../runtime/geogebra/
+          cp -a source/web/web/war/css ../../runtime/geogebra/
+          cp source/web/web/war/deployggb.js ../../runtime/geogebra/
+      - name: Record runtime hashes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          find runtime -type f -print0 | sort -z | xargs -0 sha256sum > runtime/SHA256SUMS
+          du -sh runtime/*
       - name: Upload source archives
         uses: actions/upload-artifact@v4
         with:
           name: tabweaver-pinned-source-archives
           path: source-archives/
+          compression-level: 0
+          retention-days: 1
+      - name: Upload built runtimes
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabweaver-built-runtimes
+          path: runtime/
           compression-level: 0
           retention-days: 1
           if-no-files-found: error
