@@ -1,0 +1,49 @@
+name: TabWeaver source staging
+
+on:
+  push:
+    paths:
+      - .github/workflows/tabweaver-source-stage.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SCRIPTCAT_URL: https://gh-proxy.com/https://github.com/scriptscat/scriptcat/archive/65121faaa5376eaa0d04657c2d1855a402bd153d.zip
+  PLAYCANVAS_URL: https://gh-proxy.com/https://github.com/playcanvas/engine/archive/d88289fb0c17be76ec4159974faf0d07d3582a6b.zip
+  GEOGEBRA_URL: https://gh-proxy.com/https://github.com/geogebra/geogebra/archive/e1d52684831c0ad6b0c8ef37a3f072a55ad8100f.zip
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download pinned repositories through gh-proxy.com
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p source-archives
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 \
+            "$SCRIPTCAT_URL" -o source-archives/scriptcat-source.zip
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 \
+            "$PLAYCANVAS_URL" -o source-archives/playcanvas-engine.zip
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 \
+            "$GEOGEBRA_URL" -o source-archives/geogebra.zip
+      - name: Verify and record archives
+        shell: bash
+        run: |
+          set -euxo pipefail
+          unzip -t source-archives/scriptcat-source.zip
+          unzip -t source-archives/playcanvas-engine.zip
+          unzip -t source-archives/geogebra.zip
+          sha256sum source-archives/*.zip | tee source-archives/SHA256SUMS
+          du -h source-archives/*
+      - name: Upload source archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabweaver-pinned-source-archives
+          path: source-archives/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
