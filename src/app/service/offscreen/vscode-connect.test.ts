@@ -145,6 +145,18 @@ describe("VSCodeConnect", () => {
     return wsInstances[wsInstances.length - 1];
   }
 
+  function authenticateTorsionfield(ws: MockWebSocket): void {
+    ws.simulateMessage({
+      action: "hello/ack",
+      data: {
+        protocolVersion: "torsionfield-node-v1",
+        role: "node",
+        nodeId: "node-a",
+        authenticated: true,
+      },
+    });
+  }
+
   // ────────────────────────────────────────────────
   // 连接建立
   // ────────────────────────────────────────────────
@@ -162,6 +174,21 @@ describe("VSCodeConnect", () => {
 
       expect(ws.sentMessages).toHaveLength(1);
       expect(JSON.parse(ws.sentMessages[0])).toEqual({ action: "hello" });
+    });
+
+    it("authenticates a Torsionfield connection with the fixed protocol and channel token", () => {
+      const ws = triggerConnect({ torsionfield: { token: "torsionfield-channel-token" } });
+      ws.simulateOpen();
+
+      expect(ws.sentMessages).toHaveLength(1);
+      expect(JSON.parse(ws.sentMessages[0])).toEqual({
+        action: "hello",
+        data: {
+          protocolVersion: "torsionfield-script-v1",
+          role: "extension",
+          token: "torsionfield-channel-token",
+        },
+      });
     });
 
     it("连接成功后应重置重连延迟", () => {
@@ -284,8 +311,73 @@ describe("VSCodeConnect", () => {
       }).not.toThrow();
     });
 
+    it("accepts the authenticated resident-node acknowledgment without an unknown-action warning", () => {
+      const ws = triggerConnect({ torsionfield: { token: "torsionfield-channel-token" } });
+      const logger = (
+        vscodeConnect as unknown as {
+          logger: { warn: (message: string, context?: unknown) => void };
+        }
+      ).logger;
+      const warn = vi.spyOn(logger, "warn");
+      ws.simulateOpen();
+
+      ws.simulateMessage({
+        action: "hello/ack",
+        data: {
+          protocolVersion: "torsionfield-node-v1",
+          role: "node",
+          nodeId: "node-a",
+          authenticated: true,
+        },
+      });
+
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("closes an invalid resident-node session and refuses its commands", async () => {
+      const ws = triggerConnect({ torsionfield: { token: "torsionfield-channel-token" } });
+      const logger = (
+        vscodeConnect as unknown as {
+          logger: { warn: (message: string, context?: unknown) => void };
+        }
+      ).logger;
+      const warn = vi.spyOn(logger, "warn");
+      const close = vi.spyOn(ws, "close");
+      ws.simulateOpen();
+
+      ws.simulateMessage({
+        action: "hello/ack",
+        data: {
+          protocolVersion: "torsionfield-node-v1",
+          role: "node",
+          nodeId: "node-a",
+          authenticated: false,
+        },
+      });
+
+      expect(warn).toHaveBeenCalledWith("Invalid Torsionfield handshake acknowledgment", {
+        authenticated: false,
+        nodeId: "node-a",
+        protocolVersion: "torsionfield-node-v1",
+        role: "node",
+      });
+      expect(close).toHaveBeenCalledOnce();
+
+      ws.simulateMessage({
+        action: "torsionfield",
+        data: {
+          protocolVersion: "torsionfield-script-v1",
+          operationId: "rejected-op",
+          requestedAction: "status",
+          token: "torsionfield-channel-token",
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockExecuteTorsionfield).not.toHaveBeenCalled();
+    });
+
     it("收到 torsionfield 命令时应通过 service worker 执行并回传机器结果", async () => {
-      const ws = triggerConnect();
+      const ws = triggerConnect({ torsionfield: { token: "torsionfield-channel-token" } });
       ws.simulateOpen();
       const request = {
         protocolVersion: "torsionfield-script-v1",
@@ -296,6 +388,11 @@ describe("VSCodeConnect", () => {
         code: "// code",
       };
 
+      ws.simulateMessage({ action: "torsionfield", data: request });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockExecuteTorsionfield).not.toHaveBeenCalled();
+
+      authenticateTorsionfield(ws);
       ws.simulateMessage({ action: "torsionfield", data: request });
       await vi.advanceTimersByTimeAsync(0);
 
@@ -322,8 +419,9 @@ describe("VSCodeConnect", () => {
         executionVerification: { status: "not_run" },
         error: null,
       });
-      const ws = triggerConnect();
+      const ws = triggerConnect({ torsionfield: { token: "torsionfield-channel-token" } });
       ws.simulateOpen();
+      authenticateTorsionfield(ws);
 
       ws.simulateMessage({
         action: "torsionfield",

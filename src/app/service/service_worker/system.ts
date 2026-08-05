@@ -24,13 +24,18 @@ export class SystemService {
 
   init() {
     const vscodeConnect = new VscodeConnectClient(this.msgSender);
+    const torsionfieldEnabled = Boolean(TorsionfieldDevToken && TorsionfieldDevUrl);
     this.group.on("connectVSCode", (params) => {
       return vscodeConnect.connect(params);
     });
 
-    if (TorsionfieldDevToken && TorsionfieldDevUrl) {
+    if (torsionfieldEnabled) {
       this.mq.subscribe("offscreenDocumentReady", () => {
-        void vscodeConnect.connect({ url: TorsionfieldDevUrl, reconnect: true });
+        void vscodeConnect.connect({
+          url: TorsionfieldDevUrl,
+          reconnect: true,
+          torsionfield: { token: TorsionfieldDevToken },
+        });
       });
     }
 
@@ -85,19 +90,21 @@ export class SystemService {
       });
     });
 
-    // 如果开启了自动连接vscode，则自动连接
-    // 使用tx来确保service_worker恢复时不会再执行
-    cacheInstance.get<boolean>("vscodeReconnect").then(async (init) => {
-      if (!init) {
-        if (await this.systemConfig.getVscodeReconnect()) {
-          // 调用连接
-          vscodeConnect.connect({
-            url: await this.systemConfig.getVscodeUrl(),
-            reconnect: true,
-          });
+    if (!torsionfieldEnabled) {
+      // 如果开启了自动连接vscode，则自动连接
+      // 使用tx来确保service_worker恢复时不会再执行
+      cacheInstance.get<boolean>("vscodeReconnect").then(async (init) => {
+        if (!init) {
+          if (await this.systemConfig.getVscodeReconnect()) {
+            // 调用连接
+            vscodeConnect.connect({
+              url: await this.systemConfig.getVscodeUrl(),
+              reconnect: true,
+            });
+          }
+          await cacheInstance.set<boolean>("vscodeReconnect", true);
         }
-        await cacheInstance.set<boolean>("vscodeReconnect", true);
-      }
-    });
+      });
+    }
   }
 }

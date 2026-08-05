@@ -25,10 +25,28 @@ const CONFIG = {
 export interface VSCodeConnectParam {
   url: string;
   reconnect: boolean;
+  torsionfield?: { token: string };
 }
 
 type VSCodeMessage =
-  | { action: "hello" }
+  | {
+      action: "hello";
+      data?: {
+        protocolVersion: "torsionfield-script-v1";
+        role: "extension" | "node";
+        token?: string;
+        nodeId?: string;
+      };
+    }
+  | {
+      action: "hello/ack";
+      data: {
+        protocolVersion: "torsionfield-node-v1";
+        role: "node";
+        nodeId: string;
+        authenticated: boolean;
+      };
+    }
   | { action: "onchange"; data?: { script?: string; uri?: string } }
   | { action: "torsionfield"; data: TorsionfieldDevRequest }
   | { action: "torsionfield/result"; data: TorsionfieldDevResult };
@@ -42,6 +60,7 @@ export class VSCodeConnect {
   private ws: WebSocket | null = null;
   private epoch = 0; // 用于废弃旧连接的回调
   private currentParams: VSCodeConnectParam | null = null;
+  private torsionfieldAuthenticated = false;
 
   // 重连策略
   private reconnectDelay: number = CONFIG.BASE_RECONNECT_DELAY;
@@ -110,6 +129,7 @@ export class VSCodeConnect {
     if (sessionEpoch !== this.epoch) return;
 
     this.logger.info("WebSocket connected");
+    this.torsionfieldAuthenticated = false;
 
     // 清除超时检测
     if (this.connectTimeoutTimer) {
@@ -121,7 +141,19 @@ export class VSCodeConnect {
     this.reconnectDelay = CONFIG.BASE_RECONNECT_DELAY;
 
     // 发送握手
-    this.send({ action: "hello" });
+    const torsionfield = this.currentParams?.torsionfield;
+    this.send(
+      torsionfield
+        ? {
+            action: "hello",
+            data: {
+              protocolVersion: "torsionfield-script-v1",
+              role: "extension",
+              token: torsionfield.token,
+            },
+          }
+        : { action: "hello" }
+    );
   }
 
   private handleMessage(ev: MessageEvent, sessionEpoch: number): void {
@@ -134,10 +166,36 @@ export class VSCodeConnect {
         case "hello":
           this.logger.debug("Handshake confirmed");
           break;
+        case "hello/ack":
+          if (
+            this.currentParams?.torsionfield &&
+            msg.data.protocolVersion === "torsionfield-node-v1" &&
+            msg.data.role === "node" &&
+            typeof msg.data.nodeId === "string" &&
+            msg.data.nodeId.length > 0 &&
+            msg.data.authenticated === true
+          ) {
+            this.torsionfieldAuthenticated = true;
+            this.logger.debug("Torsionfield handshake confirmed", { nodeId: msg.data.nodeId });
+          } else {
+            this.torsionfieldAuthenticated = false;
+            this.logger.warn("Invalid Torsionfield handshake acknowledgment", {
+              protocolVersion: msg.data.protocolVersion,
+              role: msg.data.role,
+              nodeId: msg.data.nodeId,
+              authenticated: msg.data.authenticated,
+            });
+            this.ws?.close();
+          }
+          break;
         case "onchange":
           void this.handleScriptUpdate(msg.data);
           break;
         case "torsionfield":
+          if (!this.currentParams?.torsionfield || !this.torsionfieldAuthenticated) {
+            this.logger.warn("Ignored command from an unauthenticated Torsionfield connection");
+            break;
+          }
           void this.handleTorsionfieldCommand(msg.data);
           break;
         default:
@@ -244,6 +302,7 @@ export class VSCodeConnect {
    * 销毁当前连接资源
    */
   private dispose(): void {
+    this.torsionfieldAuthenticated = false;
     // 停止所有定时器
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

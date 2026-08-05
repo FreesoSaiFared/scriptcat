@@ -8,13 +8,42 @@ export const TORSIONFIELD_PROTOCOL_VERSION = "torsionfield-script-v1" as const;
 
 const RECEIPTS_KEY = "torsionfield_dev_receipts_v1";
 const RELOAD_KEY = "torsionfield_dev_reload_v1";
+const FIXTURE_URL_KEY = "torsionfield_dev_fixture_url_v1";
 const MAX_RECEIPTS = 100;
 const RELOAD_TTL_MS = 60_000;
 const VERIFY_TIMEOUT_MS = 15_000;
 const VERIFY_INTERVAL_MS = 200;
 const VERIFY_RELOAD_INTERVAL_MS = 2_000;
+const TAB_INVOKE_TIMEOUT_MS = 5_000;
+const TAB_ACTION_VALUE_MAX_BYTES = 256;
+const FIXTURE_MARKER_SELECTOR = "#torsionfield-shared-marker" as const;
+const FIXTURE_MARKER_ATTRIBUTE = "data-value" as const;
 
-export type TorsionfieldDevAction = "install" | "update" | "status" | "reload" | "disable" | "enable" | "remove";
+export type TorsionfieldDevAction =
+  | "install"
+  | "update"
+  | "status"
+  | "reload"
+  | "disable"
+  | "enable"
+  | "remove"
+  | "tab.register"
+  | "tab.list"
+  | "tab.invoke";
+
+export interface TorsionfieldFixtureTab {
+  tabId: number;
+  url: string;
+}
+
+export interface TorsionfieldTabPostcondition {
+  tabId: number;
+  url: string;
+  selector: typeof FIXTURE_MARKER_SELECTOR;
+  text: string | null;
+  attribute: { name: typeof FIXTURE_MARKER_ATTRIBUTE; value: string | null };
+  visible: boolean;
+}
 
 export interface TorsionfieldExecutionVerificationRequest {
   url: string;
@@ -43,6 +72,10 @@ export interface TorsionfieldDevRequest {
   code?: string;
   subjectOperationId?: string;
   verification?: TorsionfieldExecutionVerificationRequest;
+  fixtureUrl?: string;
+  tabId?: number;
+  tabAction?: string;
+  value?: string;
 }
 
 export interface TorsionfieldDevResult {
@@ -65,12 +98,36 @@ export interface TorsionfieldDevResult {
   attemptCount: number;
   finalStatus: "in_progress" | "succeeded" | "failed" | "rejected";
   executionVerification: TorsionfieldExecutionVerification;
+  fixtureUrl?: string | null;
+  tabs?: TorsionfieldFixtureTab[];
+  postcondition?: TorsionfieldTabPostcondition | null;
   error: string | null;
 }
 
 type ReceiptStore = Record<string, TorsionfieldDevResult>;
 
 type ReloadMarker = { operationId: string; expiresAt: number };
+
+interface FixtureProbe {
+  accepted: boolean;
+  url: string;
+  readyState: DocumentReadyState;
+}
+
+interface FixtureDispatch {
+  accepted: boolean;
+  dispatched: boolean;
+  url: string;
+}
+
+interface FixtureObservation {
+  accepted: boolean;
+  matched: boolean;
+  url: string;
+  text: string | null;
+  attributeValue: string | null;
+  visible: boolean;
+}
 
 interface TorsionfieldDevServiceOptions {
   token: string;
@@ -98,6 +155,115 @@ const writeReceipt = async (receipt: TorsionfieldDevResult): Promise<void> => {
   const entries = Object.entries(receipts);
   const trimmed = Object.fromEntries(entries.slice(Math.max(0, entries.length - MAX_RECEIPTS)));
   await chrome.storage.local.set({ [RECEIPTS_KEY]: trimmed });
+};
+
+const readFixtureUrl = async (): Promise<string | null> => {
+  const value = await chrome.storage.local.get(FIXTURE_URL_KEY);
+  return typeof value[FIXTURE_URL_KEY] === "string" ? value[FIXTURE_URL_KEY] : null;
+};
+
+const normalizeLoopbackHttpUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !loopback || url.username || url.password) {
+    return null;
+  }
+  return url.href;
+};
+
+const fixtureTab = (tab: chrome.tabs.Tab): TorsionfieldFixtureTab | null =>
+  tab.id === undefined || !tab.url ? null : { tabId: tab.id, url: tab.url };
+
+// executeScript 会序列化函数体，因此每个函数都在目标页面内重新执行完整的 URL 边界检查。
+const probeFixtureTab = (expectedUrl: string): FixtureProbe => {
+  const currentUrl = location.href;
+  let accepted = false;
+  try {
+    const url = new URL(currentUrl);
+    const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+    accepted =
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      loopback &&
+      !url.username &&
+      !url.password &&
+      url.href === expectedUrl;
+  } catch {
+    accepted = false;
+  }
+  return { accepted, url: currentUrl, readyState: document.readyState };
+};
+
+const dispatchFixtureChangeMarker = (expectedUrl: string, value: string): FixtureDispatch => {
+  const currentUrl = location.href;
+  let accepted = false;
+  try {
+    const url = new URL(currentUrl);
+    const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+    accepted =
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      loopback &&
+      !url.username &&
+      !url.password &&
+      url.href === expectedUrl;
+  } catch {
+    accepted = false;
+  }
+  if (!accepted) return { accepted: false, dispatched: false, url: currentUrl };
+  document.dispatchEvent(new CustomEvent("torsionfield:fixture-change-marker", { detail: value }));
+  return { accepted: true, dispatched: true, url: currentUrl };
+};
+
+const inspectFixtureChangeMarker = (expectedUrl: string, expectedValue: string): FixtureObservation => {
+  const currentUrl = location.href;
+  let accepted = false;
+  try {
+    const url = new URL(currentUrl);
+    const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+    accepted =
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      loopback &&
+      !url.username &&
+      !url.password &&
+      url.href === expectedUrl;
+  } catch {
+    accepted = false;
+  }
+  if (!accepted) {
+    return {
+      accepted: false,
+      matched: false,
+      url: currentUrl,
+      text: null,
+      attributeValue: null,
+      visible: false,
+    };
+  }
+
+  const marker = document.querySelector("#torsionfield-shared-marker");
+  const style = marker instanceof HTMLElement ? getComputedStyle(marker) : null;
+  const visible = Boolean(
+    marker instanceof HTMLElement &&
+      !marker.hidden &&
+      style?.display !== "none" &&
+      style?.visibility !== "hidden" &&
+      style?.opacity !== "0"
+  );
+  const text = marker?.textContent ?? null;
+  const attributeValue = marker?.getAttribute("data-value") ?? null;
+  return {
+    accepted: true,
+    matched: visible && text === expectedValue && attributeValue === expectedValue,
+    url: currentUrl,
+    text,
+    attributeValue,
+    visible,
+  };
 };
 
 export const consumeTorsionfieldDevReload = async (): Promise<boolean> => {
@@ -263,6 +429,9 @@ export class TorsionfieldDevService {
     if (!this.options.token || request.token !== this.options.token) {
       return this.reject(request, "rejected_invalid_token", "invalid trusted development channel token");
     }
+    if (request.requestedAction === "tab.register") return this.registerTab(request);
+    if (request.requestedAction === "tab.list") return this.listTabs(request);
+    if (request.requestedAction === "tab.invoke") return this.invokeTab(request);
     if (request.requestedAction === "status") return this.status(request);
     if (request.requestedAction === "reload") return this.reload(request);
 
@@ -367,6 +536,317 @@ export class TorsionfieldDevService {
     }
   }
 
+  private async registerTab(request: TorsionfieldDevRequest): Promise<TorsionfieldDevResult> {
+    const fixtureUrl = normalizeLoopbackHttpUrl(request.fixtureUrl);
+    if (!fixtureUrl) {
+      return this.reject(request, "rejected_untrusted_source", "fixture URL must be a loopback HTTP(S) URL");
+    }
+    if (request.tabId !== undefined && (!Number.isInteger(request.tabId) || request.tabId < 0)) {
+      return this.reject(request, "rejected_untrusted_source", "tab id must be a non-negative integer");
+    }
+
+    let tabs: chrome.tabs.Tab[];
+    try {
+      tabs = await chrome.tabs.query({});
+    } catch (error) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_loopback_url",
+        finalStatus: "failed",
+        fixtureUrl,
+        error: preciseError(error),
+      });
+      await writeReceipt(result);
+      return result;
+    }
+    const matchingTabs = tabs
+      .filter(
+        (tab) =>
+          tab.id !== undefined && tab.url === fixtureUrl && (request.tabId === undefined || tab.id === request.tabId)
+      )
+      .map(fixtureTab)
+      .filter((tab): tab is TorsionfieldFixtureTab => tab !== null)
+      .sort((left, right) => left.tabId - right.tabId);
+    const selected = matchingTabs[0];
+    if (!selected) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_loopback_url",
+        finalStatus: "failed",
+        fixtureUrl,
+        tabs: [],
+        error: request.tabId === undefined ? "fixture tab is not open" : `fixture tab is not open: ${request.tabId}`,
+      });
+      await writeReceipt(result);
+      return result;
+    }
+
+    try {
+      const [injection] = await chrome.scripting.executeScript({
+        target: { tabId: selected.tabId },
+        func: probeFixtureTab,
+        args: [fixtureUrl],
+      });
+      const probe = injection?.result as FixtureProbe | undefined;
+      if (!probe?.accepted || probe.url !== fixtureUrl) {
+        return this.reject(
+          request,
+          "rejected_untrusted_source",
+          "selected tab no longer matches the requested loopback fixture URL",
+          { fixtureUrl, tabs: [selected] }
+        );
+      }
+      if (probe.readyState === "loading") {
+        const result = this.result(request, {
+          trustAccepted: true,
+          trustClassification: "trusted_loopback_url",
+          finalStatus: "failed",
+          fixtureUrl,
+          tabs: [selected],
+          error: "fixture tab is still loading",
+        });
+        await writeReceipt(result);
+        return result;
+      }
+    } catch (error) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_loopback_url",
+        finalStatus: "failed",
+        fixtureUrl,
+        tabs: [selected],
+        error: preciseError(error),
+      });
+      await writeReceipt(result);
+      return result;
+    }
+
+    await chrome.storage.local.set({ [FIXTURE_URL_KEY]: fixtureUrl });
+    const result = this.result(request, {
+      trustAccepted: true,
+      trustClassification: "trusted_loopback_url",
+      finalStatus: "succeeded",
+      fixtureUrl,
+      tabs: [selected],
+    });
+    await writeReceipt(result);
+    return result;
+  }
+
+  private async listTabs(request: TorsionfieldDevRequest): Promise<TorsionfieldDevResult> {
+    const storedFixtureUrl = await readFixtureUrl();
+    if (!storedFixtureUrl) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_local_channel",
+        finalStatus: "succeeded",
+      });
+      await writeReceipt(result);
+      return result;
+    }
+    const fixtureUrl = normalizeLoopbackHttpUrl(storedFixtureUrl);
+    if (!fixtureUrl || fixtureUrl !== storedFixtureUrl) {
+      return this.reject(request, "rejected_untrusted_source", "registered fixture URL is not trusted");
+    }
+
+    try {
+      const tabs = (await chrome.tabs.query({}))
+        .filter((tab) => tab.id !== undefined && tab.url === fixtureUrl)
+        .map(fixtureTab)
+        .filter((tab): tab is TorsionfieldFixtureTab => tab !== null)
+        .sort((left, right) => left.tabId - right.tabId);
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_local_channel",
+        finalStatus: "succeeded",
+        fixtureUrl,
+        tabs,
+      });
+      await writeReceipt(result);
+      return result;
+    } catch (error) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_local_channel",
+        finalStatus: "failed",
+        fixtureUrl,
+        error: preciseError(error),
+      });
+      await writeReceipt(result);
+      return result;
+    }
+  }
+
+  private async invokeTab(request: TorsionfieldDevRequest): Promise<TorsionfieldDevResult> {
+    if (request.tabAction !== "fixture.change-marker") {
+      return this.reject(
+        request,
+        "rejected_untrusted_source",
+        `unsupported tab action: ${request.tabAction ?? "missing"}`
+      );
+    }
+    const value = request.value;
+    if (typeof value !== "string") {
+      return this.reject(
+        request,
+        "rejected_untrusted_source",
+        `tab action value must contain 1 to ${TAB_ACTION_VALUE_MAX_BYTES} UTF-8 bytes`
+      );
+    }
+    const valueBytes = new TextEncoder().encode(value).byteLength;
+    if (valueBytes < 1 || valueBytes > TAB_ACTION_VALUE_MAX_BYTES) {
+      return this.reject(
+        request,
+        "rejected_untrusted_source",
+        `tab action value must contain 1 to ${TAB_ACTION_VALUE_MAX_BYTES} UTF-8 bytes`
+      );
+    }
+    const tabId = request.tabId;
+    if (tabId === undefined || !Number.isInteger(tabId) || tabId < 0) {
+      return this.reject(request, "rejected_untrusted_source", "tab id must be a non-negative integer");
+    }
+
+    const storedFixtureUrl = await readFixtureUrl();
+    const fixtureUrl = normalizeLoopbackHttpUrl(storedFixtureUrl);
+    if (!storedFixtureUrl) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_local_channel",
+        finalStatus: "failed",
+        error: "fixture tab is not registered",
+      });
+      await writeReceipt(result);
+      return result;
+    }
+    if (!fixtureUrl || fixtureUrl !== storedFixtureUrl) {
+      return this.reject(request, "rejected_untrusted_source", "registered fixture URL is not trusted");
+    }
+
+    let selectedTab: chrome.tabs.Tab | undefined;
+    try {
+      selectedTab = (await chrome.tabs.query({})).find((tab) => tab.id === tabId);
+    } catch (error) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_loopback_url",
+        finalStatus: "failed",
+        fixtureUrl,
+        error: preciseError(error),
+      });
+      await writeReceipt(result);
+      return result;
+    }
+    if (!selectedTab) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_loopback_url",
+        finalStatus: "failed",
+        fixtureUrl,
+        error: `fixture tab is not open: ${tabId}`,
+      });
+      await writeReceipt(result);
+      return result;
+    }
+    const selected = fixtureTab(selectedTab);
+    if (!selected || selected.url !== fixtureUrl) {
+      return this.reject(
+        request,
+        "rejected_untrusted_source",
+        "selected tab no longer matches the registered loopback fixture URL",
+        { fixtureUrl, tabs: selected ? [selected] : [] }
+      );
+    }
+
+    try {
+      const [injection] = await chrome.scripting.executeScript({
+        target: { tabId: selected.tabId },
+        func: dispatchFixtureChangeMarker,
+        args: [fixtureUrl, value],
+      });
+      const dispatch = injection?.result as FixtureDispatch | undefined;
+      if (!dispatch?.accepted || !dispatch.dispatched || dispatch.url !== fixtureUrl) {
+        return this.reject(
+          request,
+          "rejected_untrusted_source",
+          "selected tab no longer matches the registered loopback fixture URL",
+          { fixtureUrl, tabs: [selected] }
+        );
+      }
+    } catch (error) {
+      const result = this.result(request, {
+        trustAccepted: true,
+        trustClassification: "trusted_loopback_url",
+        finalStatus: "failed",
+        fixtureUrl,
+        tabs: [selected],
+        error: preciseError(error),
+      });
+      await writeReceipt(result);
+      return result;
+    }
+
+    const deadline = Date.now() + TAB_INVOKE_TIMEOUT_MS;
+    let lastObservation: FixtureObservation | undefined;
+    let lastError: string | undefined;
+    while (Date.now() < deadline) {
+      try {
+        const [injection] = await chrome.scripting.executeScript({
+          target: { tabId: selected.tabId },
+          func: inspectFixtureChangeMarker,
+          args: [fixtureUrl, value],
+        });
+        const observation = injection?.result as FixtureObservation | undefined;
+        if (!observation?.accepted || observation.url !== fixtureUrl) {
+          return this.reject(
+            request,
+            "rejected_untrusted_source",
+            "selected tab no longer matches the registered loopback fixture URL",
+            { fixtureUrl, tabs: [selected] }
+          );
+        }
+        lastObservation = observation;
+        if (observation.matched) {
+          const result = this.result(request, {
+            trustAccepted: true,
+            trustClassification: "trusted_loopback_url",
+            finalStatus: "succeeded",
+            fixtureUrl,
+            tabs: [selected],
+            postcondition: this.postcondition(selected.tabId, observation),
+          });
+          await writeReceipt(result);
+          return result;
+        }
+      } catch (error) {
+        lastError = preciseError(error);
+      }
+      await wait(VERIFY_INTERVAL_MS);
+    }
+
+    const result = this.result(request, {
+      trustAccepted: true,
+      trustClassification: "trusted_loopback_url",
+      finalStatus: "failed",
+      fixtureUrl,
+      tabs: [selected],
+      postcondition: lastObservation ? this.postcondition(selected.tabId, lastObservation) : null,
+      error: lastError ?? "fixture userscript marker was not observed before timeout",
+    });
+    await writeReceipt(result);
+    return result;
+  }
+
+  private postcondition(tabId: number, observation: FixtureObservation): TorsionfieldTabPostcondition {
+    return {
+      tabId,
+      url: observation.url,
+      selector: FIXTURE_MARKER_SELECTOR,
+      text: observation.text,
+      attribute: { name: FIXTURE_MARKER_ATTRIBUTE, value: observation.attributeValue },
+      visible: observation.visible,
+    };
+  }
+
   private async status(request: TorsionfieldDevRequest): Promise<TorsionfieldDevResult> {
     const subjectOperationId = request.subjectOperationId;
     const subject = subjectOperationId ? (await readReceipts())[subjectOperationId] : undefined;
@@ -412,7 +892,8 @@ export class TorsionfieldDevService {
   private async reject(
     request: TorsionfieldDevRequest,
     trustClassification: "rejected_invalid_token" | "rejected_untrusted_source",
-    error: string
+    error: string,
+    overrides: Partial<TorsionfieldDevResult> = {}
   ): Promise<TorsionfieldDevResult> {
     const result = this.result(request, {
       trustAccepted: false,
@@ -420,6 +901,7 @@ export class TorsionfieldDevService {
       attemptCount: 1,
       finalStatus: "rejected",
       error,
+      ...overrides,
     });
     await writeReceipt(result);
     return result;
@@ -440,6 +922,9 @@ export class TorsionfieldDevService {
       attemptCount: 1,
       finalStatus: "failed",
       executionVerification: noVerification(),
+      fixtureUrl: null,
+      tabs: [],
+      postcondition: null,
       error: null,
       ...overrides,
     };

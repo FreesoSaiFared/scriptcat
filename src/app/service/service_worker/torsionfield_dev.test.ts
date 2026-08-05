@@ -269,6 +269,354 @@ describe("Torsionfield trusted development service", () => {
     vi.useRealTimers();
   });
 
+  it("registers one exact loopback fixture tab and rediscovers it from durable URL state", async () => {
+    const fixtureUrl = "http://127.0.0.1:18765/fixture.html";
+    const fixtureTab = { id: 41, url: fixtureUrl } as chrome.tabs.Tab;
+    const remoteTab = { id: 42, url: "https://example.com/fixture.html" } as chrome.tabs.Tab;
+    const previousQuery = chrome.tabs.query;
+    const previousScripting = chrome.scripting;
+    chrome.tabs.query = vi.fn(async () => [remoteTab, fixtureTab]) as unknown as typeof chrome.tabs.query;
+    chrome.scripting = {
+      executeScript: vi.fn(async () => [
+        {
+          result: {
+            accepted: true,
+            url: fixtureUrl,
+            readyState: "complete",
+          },
+        },
+      ]),
+    } as unknown as typeof chrome.scripting;
+
+    try {
+      const registered = await createService().execute(
+        makeRequest({
+          operationId: "op-tab-register",
+          requestedAction: "tab.register",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          fixtureUrl,
+          tabId: 41,
+        })
+      );
+
+      expect(registered).toMatchObject({
+        requestedAction: "tab.register",
+        trustAccepted: true,
+        trustClassification: "trusted_loopback_url",
+        finalStatus: "succeeded",
+        fixtureUrl,
+        tabs: [{ tabId: 41, url: fixtureUrl }],
+        postcondition: null,
+        error: null,
+      });
+      expect(JSON.stringify(await chrome.storage.local.get())).toContain(fixtureUrl);
+
+      const listed = await createService().execute(
+        makeRequest({
+          operationId: "op-tab-list-after-restart",
+          requestedAction: "tab.list",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+        })
+      );
+
+      expect(listed).toMatchObject({
+        requestedAction: "tab.list",
+        trustAccepted: true,
+        trustClassification: "trusted_local_channel",
+        finalStatus: "succeeded",
+        fixtureUrl,
+        tabs: [{ tabId: 41, url: fixtureUrl }],
+        postcondition: null,
+        error: null,
+      });
+    } finally {
+      chrome.tabs.query = previousQuery;
+      chrome.scripting = previousScripting;
+    }
+  });
+
+  it("rejects remote fixture registration before scripting or durable registration", async () => {
+    const previousQuery = chrome.tabs.query;
+    const previousScripting = chrome.scripting;
+    const executeScript = vi.fn();
+    chrome.tabs.query = vi.fn(async () => []) as unknown as typeof chrome.tabs.query;
+    chrome.scripting = { executeScript } as unknown as typeof chrome.scripting;
+
+    try {
+      const result = await createService().execute(
+        makeRequest({
+          operationId: "op-tab-register-remote",
+          requestedAction: "tab.register",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          fixtureUrl: "https://example.com/fixture.html",
+        })
+      );
+
+      expect(result).toMatchObject({
+        trustAccepted: false,
+        trustClassification: "rejected_untrusted_source",
+        finalStatus: "rejected",
+        error: "fixture URL must be a loopback HTTP(S) URL",
+      });
+      expect(executeScript).not.toHaveBeenCalled();
+      expect(JSON.stringify(await chrome.storage.local.get())).not.toContain("example.com/fixture.html");
+    } finally {
+      chrome.tabs.query = previousQuery;
+      chrome.scripting = previousScripting;
+    }
+  });
+
+  it("invokes only the fixed userscript action and returns its visible marker postcondition", async () => {
+    const fixtureUrl = "http://127.0.0.1:18765/fixture.html";
+    const fixtureTab = { id: 51, url: fixtureUrl } as chrome.tabs.Tab;
+    const previousQuery = chrome.tabs.query;
+    const previousScripting = chrome.scripting;
+    const executeScript = vi
+      .fn()
+      .mockResolvedValueOnce([{ result: { accepted: true, url: fixtureUrl, readyState: "complete" } }])
+      .mockResolvedValueOnce([{ result: { accepted: true, dispatched: true, url: fixtureUrl } }])
+      .mockResolvedValueOnce([
+        {
+          result: {
+            accepted: true,
+            matched: true,
+            url: fixtureUrl,
+            text: "marker-v2",
+            attributeValue: "marker-v2",
+            visible: true,
+          },
+        },
+      ]);
+    chrome.tabs.query = vi.fn(async () => [fixtureTab]) as unknown as typeof chrome.tabs.query;
+    chrome.scripting = { executeScript } as unknown as typeof chrome.scripting;
+
+    try {
+      const service = createService();
+      await service.execute(
+        makeRequest({
+          operationId: "op-tab-register-for-invoke",
+          requestedAction: "tab.register",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          fixtureUrl,
+        })
+      );
+
+      const result = await service.execute(
+        makeRequest({
+          operationId: "op-tab-invoke",
+          requestedAction: "tab.invoke",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          tabId: 51,
+          tabAction: "fixture.change-marker",
+          value: "marker-v2",
+        })
+      );
+
+      expect(result).toMatchObject({
+        requestedAction: "tab.invoke",
+        trustAccepted: true,
+        trustClassification: "trusted_loopback_url",
+        finalStatus: "succeeded",
+        fixtureUrl,
+        tabs: [{ tabId: 51, url: fixtureUrl }],
+        postcondition: {
+          tabId: 51,
+          url: fixtureUrl,
+          selector: "#torsionfield-shared-marker",
+          text: "marker-v2",
+          attribute: { name: "data-value", value: "marker-v2" },
+          visible: true,
+        },
+        error: null,
+      });
+      expect(executeScript).toHaveBeenCalledTimes(3);
+      expect(executeScript.mock.calls[1][0]).toMatchObject({
+        target: { tabId: 51 },
+        args: [fixtureUrl, "marker-v2"],
+      });
+    } finally {
+      chrome.tabs.query = previousQuery;
+      chrome.scripting = previousScripting;
+    }
+  });
+
+  it("accepts exactly 256 UTF-8 bytes but rejects unsupported actions and larger values without dispatching", async () => {
+    const fixtureUrl = "http://127.0.0.1:18765/fixture.html";
+    const boundaryValue = "é".repeat(128);
+    const fixtureTab = { id: 61, url: fixtureUrl } as chrome.tabs.Tab;
+    const previousQuery = chrome.tabs.query;
+    const previousScripting = chrome.scripting;
+    const executeScript = vi
+      .fn()
+      .mockResolvedValueOnce([{ result: { accepted: true, url: fixtureUrl, readyState: "complete" } }])
+      .mockResolvedValueOnce([{ result: { accepted: true, dispatched: true, url: fixtureUrl } }])
+      .mockResolvedValueOnce([
+        {
+          result: {
+            accepted: true,
+            matched: true,
+            url: fixtureUrl,
+            text: boundaryValue,
+            attributeValue: boundaryValue,
+            visible: true,
+          },
+        },
+      ]);
+    chrome.tabs.query = vi.fn(async () => [fixtureTab]) as unknown as typeof chrome.tabs.query;
+    chrome.scripting = { executeScript } as unknown as typeof chrome.scripting;
+
+    try {
+      const service = createService();
+      await service.execute(
+        makeRequest({
+          operationId: "op-tab-register-for-rejections",
+          requestedAction: "tab.register",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          fixtureUrl,
+        })
+      );
+
+      const unsupported = await service.execute(
+        makeRequest({
+          operationId: "op-tab-invoke-unsupported",
+          requestedAction: "tab.invoke",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          tabId: 61,
+          tabAction: "page.evaluate",
+          value: "marker-v2",
+        })
+      );
+      const empty = await service.execute(
+        makeRequest({
+          operationId: "op-tab-invoke-empty",
+          requestedAction: "tab.invoke",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          tabId: 61,
+          tabAction: "fixture.change-marker",
+          value: "",
+        })
+      );
+      const atLimit = await service.execute(
+        makeRequest({
+          operationId: "op-tab-invoke-at-limit",
+          requestedAction: "tab.invoke",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          tabId: 61,
+          tabAction: "fixture.change-marker",
+          value: boundaryValue,
+        })
+      );
+      const oversized = await service.execute(
+        makeRequest({
+          operationId: "op-tab-invoke-oversized",
+          requestedAction: "tab.invoke",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          tabId: 61,
+          tabAction: "fixture.change-marker",
+          value: "é".repeat(129),
+        })
+      );
+
+      expect(unsupported).toMatchObject({
+        finalStatus: "rejected",
+        error: "unsupported tab action: page.evaluate",
+      });
+      expect(empty).toMatchObject({
+        finalStatus: "rejected",
+        error: "tab action value must contain 1 to 256 UTF-8 bytes",
+      });
+      expect(atLimit).toMatchObject({
+        finalStatus: "succeeded",
+        postcondition: {
+          text: boundaryValue,
+          attribute: { name: "data-value", value: boundaryValue },
+        },
+      });
+      expect(oversized).toMatchObject({
+        finalStatus: "rejected",
+        error: "tab action value must contain 1 to 256 UTF-8 bytes",
+      });
+      expect(executeScript).toHaveBeenCalledTimes(3);
+    } finally {
+      chrome.tabs.query = previousQuery;
+      chrome.scripting = previousScripting;
+    }
+  });
+
+  it("does not dispatch when the selected tab navigates away from the registered loopback URL", async () => {
+    const fixtureUrl = "http://127.0.0.1:18765/fixture.html";
+    const fixtureTab = { id: 71, url: fixtureUrl } as chrome.tabs.Tab;
+    const previousQuery = chrome.tabs.query;
+    const previousScripting = chrome.scripting;
+    const executeScript = vi
+      .fn()
+      .mockResolvedValueOnce([{ result: { accepted: true, url: fixtureUrl, readyState: "complete" } }])
+      .mockResolvedValueOnce([
+        { result: { accepted: false, dispatched: false, url: "https://example.com/fixture.html" } },
+      ]);
+    chrome.tabs.query = vi.fn(async () => [fixtureTab]) as unknown as typeof chrome.tabs.query;
+    chrome.scripting = { executeScript } as unknown as typeof chrome.scripting;
+
+    try {
+      const service = createService();
+      await service.execute(
+        makeRequest({
+          operationId: "op-tab-register-before-navigation",
+          requestedAction: "tab.register",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          fixtureUrl,
+        })
+      );
+
+      const result = await service.execute(
+        makeRequest({
+          operationId: "op-tab-invoke-after-navigation",
+          requestedAction: "tab.invoke",
+          sourceUri: undefined,
+          code: undefined,
+          verification: undefined,
+          tabId: 71,
+          tabAction: "fixture.change-marker",
+          value: "must-not-run",
+        })
+      );
+
+      expect(result).toMatchObject({
+        finalStatus: "rejected",
+        trustAccepted: false,
+        trustClassification: "rejected_untrusted_source",
+        postcondition: null,
+        error: "selected tab no longer matches the registered loopback fixture URL",
+      });
+      expect(executeScript).toHaveBeenCalledTimes(2);
+    } finally {
+      chrome.tabs.query = previousQuery;
+      chrome.scripting = previousScripting;
+    }
+  });
+
   it("verifies the element matching the requested version when an older fixture marker also exists", async () => {
     document.body.innerHTML = `
       <div id="scriptcat-bootstrap-smoke" data-version="1.0.2">ScriptCat userscript update 1.0.2 executed</div>

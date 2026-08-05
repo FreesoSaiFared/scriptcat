@@ -31,6 +31,8 @@ CHANGELOG.md
 
 .env
 .torsionfield-channel.json
+.torsionfield-node/
+torsion-node/target/
 
 package-lock.json
 yarn.lock

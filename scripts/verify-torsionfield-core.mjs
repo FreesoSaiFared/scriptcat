@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { WebSocket, WebSocketServer } from "ws";
+import { TORSIONFIELD_CHANNEL_PROTOCOL, readTorsionfieldChannelConfig } from "./torsionfield-channel-config.mjs";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const cliPath = join(rootDir, "scripts", "torsionfield-script.mjs");
 const markerSelector = "#torsionfield-core-smoke";
 const runId = randomUUID();
 const operationId = (phase) => `torsionfield-core-${runId}-${phase}`;
@@ -39,15 +40,109 @@ const runRequired = async (command, args) => {
   return result;
 };
 
-const runCli = async (args) => {
-  const result = await runRequired(process.execPath, [cliPath, ...args]);
-  const line = result.stdout
-    .split(/\r?\n/)
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .at(-1);
-  if (!line) throw new Error(`torsionfield-script returned no receipt for ${args[0]}`);
-  const receipt = JSON.parse(line);
+const config = readTorsionfieldChannelConfig(rootDir);
+
+const executeDirect = async (request) => {
+  const url = new URL(config.url);
+  const channel = new WebSocketServer({
+    host: url.hostname.replaceAll("[", "").replaceAll("]", ""),
+    port: Number(url.port),
+  });
+  return await new Promise((resolveResult, rejectResult) => {
+    let settled = false;
+    let connectionCount = 0;
+    let pendingReloadResult;
+    const timeout = setTimeout(
+      () =>
+        finish(
+          undefined,
+          new Error(
+            pendingReloadResult
+              ? "ScriptCat acknowledged reload but the core channel did not reconnect"
+              : "timed out waiting for ScriptCat core channel"
+          )
+        ),
+      45_000
+    );
+    const finish = (result, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      for (const client of channel.clients) client.close();
+      channel.close(() => (error ? rejectResult(error) : resolveResult(result)));
+    };
+    channel.on("error", (error) => finish(undefined, error));
+    channel.on("connection", (socket) => {
+      connectionCount += 1;
+      let sent = false;
+      const send = () => {
+        if (sent || socket.readyState !== WebSocket.OPEN) return;
+        sent = true;
+        socket.send(JSON.stringify({ action: "torsionfield", data: request }));
+      };
+      socket.on("message", (raw) => {
+        let message;
+        try {
+          message = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+        if (message.action === "hello") {
+          const authenticated =
+            message.data?.protocolVersion === TORSIONFIELD_CHANNEL_PROTOCOL &&
+            message.data?.role === "extension" &&
+            message.data?.token === config.token;
+          socket.send(
+            JSON.stringify({
+              action: "hello/ack",
+              data: {
+                protocolVersion: "torsionfield-node-v1",
+                role: "node",
+                nodeId: "torsionfield-core-smoke",
+                authenticated,
+              },
+            })
+          );
+          if (!authenticated) {
+            socket.close();
+            return;
+          }
+          if (pendingReloadResult) {
+            finish({
+              ...pendingReloadResult,
+              channelReconnection: { status: "passed", connectionCount },
+            });
+          } else {
+            send();
+          }
+        } else if (message.action === "torsionfield/result" && message.data?.operationId === request.operationId) {
+          if (request.requestedAction === "reload" && message.data.finalStatus === "succeeded") {
+            pendingReloadResult = message.data;
+          } else {
+            finish(message.data);
+          }
+        }
+      });
+    });
+  });
+};
+
+const runCoreAction = async ({ requestedAction, id, source = false, subjectOperationId, verification }) => {
+  const request = {
+    protocolVersion: TORSIONFIELD_CHANNEL_PROTOCOL,
+    operationId: id,
+    requestedAction,
+    token: config.token,
+  };
+  if (source) {
+    request.sourceUri = pathToFileURL(sourcePath).href;
+    if (requestedAction === "install" || requestedAction === "update") {
+      request.code = await readFile(sourcePath, "utf8");
+    }
+  }
+  if (subjectOperationId) request.subjectOperationId = subjectOperationId;
+  if (verification) request.verification = verification;
+  const receipt = await executeDirect(request);
   if (receipt.finalStatus !== "succeeded") throw new Error(JSON.stringify(receipt));
   return receipt;
 };
@@ -73,24 +168,14 @@ const scriptCode = (version) => `// ==UserScript==
 })();
 `;
 
-const verificationArgs = (version) => [
-  "--verify-url",
-  fixtureUrl,
-  "--verify-selector",
-  markerSelector,
-  "--verify-attribute",
-  `data-version=${version}`,
-  "--verify-text",
-  `Torsionfield core ${version} executed`,
-];
+const verification = (version) => ({
+  url: fixtureUrl,
+  selector: markerSelector,
+  attribute: { name: "data-version", value: version },
+  text: `Torsionfield core ${version} executed`,
+});
 
-const absentVerificationArgs = () => [
-  "--verify-url",
-  fixtureUrl,
-  "--verify-selector",
-  markerSelector,
-  "--verify-absent",
-];
+const absentVerification = () => ({ url: fixtureUrl, selector: markerSelector, expectAbsent: true });
 
 const listen = (server) =>
   new Promise((resolveListen, rejectListen) => {
@@ -129,55 +214,53 @@ try {
   fixtureUrl = `http://127.0.0.1:${fixturePort}/fixture.html`;
   const corepack = join(dirname(process.execPath), "node_modules", "corepack", "dist", "corepack.js");
   const build = await runRequired(process.execPath, [corepack, "pnpm", "run", "build:torsionfield"]);
-  const loaded = await runCli(["reload", "--operation-id", operationId("load-build")]);
+  const loaded = await runCoreAction({ requestedAction: "reload", id: operationId("load-build") });
 
   await writeFile(sourcePath, scriptCode("1.0.0"), "utf8");
-  const installed = await runCli([
-    "install",
-    sourcePath,
-    "--operation-id",
-    operationId("install"),
-    ...verificationArgs("1.0.0"),
-  ]);
+  const installed = await runCoreAction({
+    requestedAction: "install",
+    id: operationId("install"),
+    source: true,
+    verification: verification("1.0.0"),
+  });
 
   await writeFile(sourcePath, scriptCode("1.0.1"), "utf8");
-  const updated = await runCli([
-    "update",
-    sourcePath,
-    "--operation-id",
-    operationId("update"),
-    ...verificationArgs("1.0.1"),
-  ]);
-  const disabled = await runCli([
-    "disable",
-    sourcePath,
-    "--operation-id",
-    operationId("disable"),
-    ...absentVerificationArgs(),
-  ]);
-  const enabled = await runCli([
-    "enable",
-    sourcePath,
-    "--operation-id",
-    operationId("enable"),
-    ...verificationArgs("1.0.1"),
-  ]);
-  const reloaded = await runCli(["reload", "--operation-id", operationId("reload")]);
-  const persistent = await runCli([
-    "enable",
-    sourcePath,
-    "--operation-id",
-    operationId("persistence"),
-    ...verificationArgs("1.0.1"),
-  ]);
-  const status = await runCli(["status", updated.operationId, "--operation-id", operationId("status-after-reload")]);
-  const removed = await runCli([
-    "remove",
-    sourcePath,
-    "--operation-id",
-    operationId("remove"),
-    ...absentVerificationArgs(),
-  ]);
+  const updated = await runCoreAction({
+    requestedAction: "update",
+    id: operationId("update"),
+    source: true,
+    verification: verification("1.0.1"),
+  });
+  const disabled = await runCoreAction({
+    requestedAction: "disable",
+    id: operationId("disable"),
+    source: true,
+    verification: absentVerification(),
+  });
+  const enabled = await runCoreAction({
+    requestedAction: "enable",
+    id: operationId("enable"),
+    source: true,
+    verification: verification("1.0.1"),
+  });
+  const reloaded = await runCoreAction({ requestedAction: "reload", id: operationId("reload") });
+  const persistent = await runCoreAction({
+    requestedAction: "enable",
+    id: operationId("persistence"),
+    source: true,
+    verification: verification("1.0.1"),
+  });
+  const status = await runCoreAction({
+    requestedAction: "status",
+    id: operationId("status-after-reload"),
+    subjectOperationId: updated.operationId,
+  });
+  const removed = await runCoreAction({
+    requestedAction: "remove",
+    id: operationId("remove"),
+    source: true,
+    verification: absentVerification(),
+  });
 
   process.stdout.write(
     `${JSON.stringify({
