@@ -28,7 +28,7 @@ impl ChannelConfig {
         if config.protocol_version != CHANNEL_PROTOCOL {
             bail!("unsupported channel protocol: {}", config.protocol_version);
         }
-        validate_listen_url(&config.url)?;
+        validate_channel_url(&config.url)?;
         if config.token.len() < 32 {
             bail!("channel token must contain at least 32 characters");
         }
@@ -83,7 +83,7 @@ pub fn validate_identifier(value: &str, label: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_listen_url(value: &str) -> Result<Url> {
+fn parse_listener_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).with_context(|| format!("invalid WebSocket URL: {value}"))?;
     if url.scheme() != "ws" {
         bail!("resident listener requires a ws:// URL");
@@ -91,11 +91,27 @@ pub fn validate_listen_url(value: &str) -> Result<Url> {
     if url.host_str().is_none() || url.port().is_none() {
         bail!("resident listener URL requires a host and explicit port");
     }
-    if !matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1")) {
-        bail!("resident listener must use a loopback host");
-    }
     if url.path() != "/" && !url.path().is_empty() {
         bail!("resident listener URL must not contain a path");
+    }
+    Ok(url)
+}
+
+fn validate_channel_url(value: &str) -> Result<Url> {
+    let url = parse_listener_url(value)?;
+    if !matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1")) {
+        bail!("ScriptCat channel must use a loopback host");
+    }
+    Ok(url)
+}
+
+pub fn validate_listen_url(value: &str) -> Result<Url> {
+    let url = parse_listener_url(value)?;
+    if !matches!(
+        url.host_str(),
+        Some("127.0.0.1" | "localhost" | "::1" | "0.0.0.0")
+    ) {
+        bail!("resident listener must use a loopback or wildcard host");
     }
     Ok(url)
 }
