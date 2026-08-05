@@ -1,0 +1,68 @@
+name: MindTown alternative engine split staging
+
+on:
+  push:
+    paths:
+      - .github/workflows/mindtown-alternatives-split.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: threejs
+            repo: mrdoob/three.js
+          - slug: babylonjs
+            repo: BabylonJS/Babylon.js
+    steps:
+      - name: Download exact source archive through gh-proxy.com
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sha="$(git ls-remote "https://github.com/${{ matrix.repo }}.git" HEAD | awk '{print $1}')"
+          url="https://gh-proxy.com/https://github.com/${{ matrix.repo }}/archive/${sha}.zip"
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$url" -o source.zip
+          unzip -tq source.zip
+          sha256sum source.zip > SHA256SUM
+          printf '%s\t%s\t%s\n' '${{ matrix.repo }}' "$sha" "$url" > SOURCE_LOCK.tsv
+          split -b 450M -d -a 2 source.zip source.zip.part-
+          ls -lh source.zip.part-* SHA256SUM SOURCE_LOCK.tsv
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-source-manifest
+          path: |
+            SHA256SUM
+            SOURCE_LOCK.tsv
+          compression-level: 0
+          retention-days: 2
+      - name: Upload source part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-source-part-00
+          path: source.zip.part-00
+          compression-level: 0
+          retention-days: 2
+      - name: Upload source part 01
+        if: hashFiles('source.zip.part-01') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-source-part-01
+          path: source.zip.part-01
+          compression-level: 0
+          retention-days: 2
+      - name: Upload source part 02
+        if: hashFiles('source.zip.part-02') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-source-part-02
+          path: source.zip.part-02
+          compression-level: 0
+          retention-days: 2
