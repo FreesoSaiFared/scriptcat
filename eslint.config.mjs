@@ -165,5 +165,15 @@ export default [
       "@typescript-eslint/await-thenable": "error",
     },
   },
-  { ignores: ["dist/", "example/", ".claude/", "playwright-report/", "test-results/", "coverage/"] },
+  {
+    ignores: [
+      "dist/",
+      "example/",
+      ".claude/",
+      ".torsionfield-profile/",
+      "playwright-report/",
+      "test-results/",
+      "coverage/",
+    ],
+  },
 ];

@@ -94,6 +94,7 @@ describe("构建配置 - 浏览器专用 manifest", () => {
         extension_pages: "script-src 'self'",
         sandbox: "firefox-only",
       },
+      message_serialization: "structured_clone",
     };
 
     const result = createChromeManifest(source, true);
@@ -111,6 +112,7 @@ describe("构建配置 - 浏览器专用 manifest", () => {
     expect(source.background).toHaveProperty("scripts");
     expect(source.optional_permissions).toContain("userScripts");
     expect(source.content_security_policy).toHaveProperty("sandbox");
+    expect(result).not.toHaveProperty("message_serialization");
   });
 
   it("Firefox 产物仅保留支持的后台字段和权限", () => {

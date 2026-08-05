@@ -401,9 +401,14 @@ export class ScriptService {
   }
 
   // 直接通过code静默安装脚本
-  async installByCode(param: { uuid: string; code: string; upsertBy: InstallSource }) {
-    const { code, upsertBy, uuid } = param;
-    const { script } = await prepareScriptByCode(code, "", uuid, true);
+  async installByCode(param: {
+    uuid: string;
+    code: string;
+    upsertBy: InstallSource;
+    matchByNameAndNamespace?: boolean;
+  }) {
+    const { code, upsertBy, uuid, matchByNameAndNamespace = true } = param;
+    const { script } = await prepareScriptByCode(code, "", uuid, matchByNameAndNamespace);
     await this.installScript({
       script,
       code,

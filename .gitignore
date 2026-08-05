@@ -30,6 +30,7 @@ CHANGELOG.md
 .prettiercache
 
 .env
+.torsionfield-channel.json
 
 package-lock.json
 yarn.lock

@@ -27,6 +27,7 @@ import type { TrashScript } from "@App/app/repo/trash_script";
 import { encodeRValue, type TKeyValuePair } from "@App/pkg/utils/message_value";
 import { type TSetValuesParams } from "./value";
 import type { LocalBackupExport } from "./synchronize";
+import type { TorsionfieldDevRequest, TorsionfieldDevResult } from "./torsionfield_dev";
 
 export class ServiceWorkerClient extends Client {
   constructor(msgSender: MessageSend) {
@@ -35,6 +36,16 @@ export class ServiceWorkerClient extends Client {
 
   preparationOffscreen(data: { verified: boolean }) {
     return this.do("preparationOffscreen", data);
+  }
+}
+
+export class TorsionfieldDevClient extends Client {
+  constructor(msgSender: MessageSend) {
+    super(msgSender, "serviceWorker/torsionfieldDev");
+  }
+
+  execute(request: TorsionfieldDevRequest): Promise<TorsionfieldDevResult> {
+    return this.doThrow("execute", request);
   }
 }
 

@@ -2,8 +2,9 @@ import LoggerCore from "@App/app/logger/core";
 import Logger from "@App/app/logger/logger";
 import { type Group } from "@Packages/message/server";
 import type { MessageSend } from "@Packages/message/types";
-import { ScriptClient } from "../service_worker/client";
+import { ScriptClient, TorsionfieldDevClient } from "../service_worker/client";
 import { v5 as uuidv5 } from "uuid";
+import type { TorsionfieldDevRequest, TorsionfieldDevResult } from "../service_worker/torsionfield_dev";
 
 /**
  * VSCode ↔ ScriptCat 连接管理器
@@ -26,17 +27,16 @@ export interface VSCodeConnectParam {
   reconnect: boolean;
 }
 
-interface VSCodeMessage {
-  action: "hello" | "onchange";
-  data?: {
-    script?: string;
-    uri?: string;
-  };
-}
+type VSCodeMessage =
+  | { action: "hello" }
+  | { action: "onchange"; data?: { script?: string; uri?: string } }
+  | { action: "torsionfield"; data: TorsionfieldDevRequest }
+  | { action: "torsionfield/result"; data: TorsionfieldDevResult };
 
 export class VSCodeConnect {
   private readonly logger = LoggerCore.logger().with({ service: "VSCodeConnect" });
   private readonly scriptClient: ScriptClient;
+  private readonly torsionfieldClient: TorsionfieldDevClient;
 
   // 连接状态
   private ws: WebSocket | null = null;
@@ -53,6 +53,7 @@ export class VSCodeConnect {
     messageSender: MessageSend
   ) {
     this.scriptClient = new ScriptClient(messageSender);
+    this.torsionfieldClient = new TorsionfieldDevClient(messageSender);
   }
 
   public init(): void {
@@ -136,6 +137,9 @@ export class VSCodeConnect {
         case "onchange":
           void this.handleScriptUpdate(msg.data);
           break;
+        case "torsionfield":
+          void this.handleTorsionfieldCommand(msg.data);
+          break;
         default:
           this.logger.warn("Unknown action received", { action: msg.action });
       }
@@ -172,7 +176,7 @@ export class VSCodeConnect {
     this.scheduleReconnect();
   }
 
-  private async handleScriptUpdate(data: VSCodeMessage["data"]): Promise<void> {
+  private async handleScriptUpdate(data: { script?: string; uri?: string } | undefined): Promise<void> {
     const { script, uri } = data || {};
     if (!script || !uri) {
       this.logger.warn("Invalid script update payload", { uri });
@@ -185,6 +189,32 @@ export class VSCodeConnect {
       this.logger.info("Script installed/updated", { uuid: stableId, uri });
     } catch (e) {
       this.logger.error("Install failed", Logger.E(e));
+    }
+  }
+
+  private async handleTorsionfieldCommand(request: TorsionfieldDevRequest): Promise<void> {
+    try {
+      const result = await this.torsionfieldClient.execute(request);
+      this.send({ action: "torsionfield/result", data: result });
+    } catch (error) {
+      this.send({
+        action: "torsionfield/result",
+        data: {
+          protocolVersion: "torsionfield-script-v1",
+          operationId: request.operationId,
+          requestedAction: request.requestedAction,
+          trustAccepted: false,
+          trustClassification: "transport_unavailable",
+          scriptId: null,
+          scriptName: null,
+          requestedVersion: null,
+          installedVersion: null,
+          attemptCount: 1,
+          finalStatus: "failed",
+          executionVerification: { status: "not_run" },
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
     }
   }
 

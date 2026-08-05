@@ -78,6 +78,7 @@ let wsInstances: MockWebSocket[] = [];
 describe("VSCodeConnect", () => {
   let vscodeConnect: VSCodeConnect;
   let mockInstallByCode: ReturnType<typeof vi.fn>;
+  let mockExecuteTorsionfield: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -104,10 +105,26 @@ describe("VSCodeConnect", () => {
 
     // Mock ScriptClient.installByCode
     mockInstallByCode = vi.fn().mockResolvedValue(undefined);
+    mockExecuteTorsionfield = vi.fn().mockResolvedValue({
+      protocolVersion: "torsionfield-script-v1",
+      operationId: "op-1",
+      requestedAction: "update",
+      trustAccepted: true,
+      trustClassification: "trusted_local_file",
+      scriptId: "script-1",
+      scriptName: "Smoke",
+      requestedVersion: "1.0.4",
+      installedVersion: "1.0.4",
+      attemptCount: 1,
+      finalStatus: "succeeded",
+      executionVerification: { status: "passed" },
+      error: null,
+    });
 
     vscodeConnect = new VSCodeConnect(group, mockMessage);
     // 替换内部 scriptClient
     (vscodeConnect as any).scriptClient = { installByCode: mockInstallByCode };
+    (vscodeConnect as any).torsionfieldClient = { execute: mockExecuteTorsionfield };
     vscodeConnect.init();
   });
 
@@ -265,6 +282,63 @@ describe("VSCodeConnect", () => {
       expect(() => {
         ws.simulateMessage({ action: "unknown_action" });
       }).not.toThrow();
+    });
+
+    it("收到 torsionfield 命令时应通过 service worker 执行并回传机器结果", async () => {
+      const ws = triggerConnect();
+      ws.simulateOpen();
+      const request = {
+        protocolVersion: "torsionfield-script-v1",
+        operationId: "op-1",
+        requestedAction: "update",
+        token: "secret",
+        sourceUri: "file:///smoke.user.js",
+        code: "// code",
+      };
+
+      ws.simulateMessage({ action: "torsionfield", data: request });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockExecuteTorsionfield).toHaveBeenCalledWith(request);
+      expect(JSON.parse(ws.sentMessages.at(-1)!)).toMatchObject({
+        action: "torsionfield/result",
+        data: { operationId: "op-1", finalStatus: "succeeded" },
+      });
+    });
+
+    it("reload 命令应回传 service worker 的机器结果", async () => {
+      mockExecuteTorsionfield.mockResolvedValue({
+        protocolVersion: "torsionfield-script-v1",
+        operationId: "op-reload",
+        requestedAction: "reload",
+        trustAccepted: true,
+        trustClassification: "trusted_local_channel",
+        scriptId: null,
+        scriptName: null,
+        requestedVersion: null,
+        installedVersion: null,
+        attemptCount: 1,
+        finalStatus: "succeeded",
+        executionVerification: { status: "not_run" },
+        error: null,
+      });
+      const ws = triggerConnect();
+      ws.simulateOpen();
+
+      ws.simulateMessage({
+        action: "torsionfield",
+        data: {
+          protocolVersion: "torsionfield-script-v1",
+          operationId: "op-reload",
+          requestedAction: "reload",
+          token: "secret",
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(JSON.parse(ws.sentMessages.at(-1)!)).toMatchObject({
+        action: "torsionfield/result",
+        data: { operationId: "op-reload", finalStatus: "succeeded" },
+      });
     });
   });
 

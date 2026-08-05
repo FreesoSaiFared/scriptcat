@@ -4,7 +4,8 @@ import { ZipExecutionPlugin } from "./rspack-plugins/ZipExecutionPlugin";
 import { readFileSync } from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { toChromeVersion } from "./scripts/version.js";
-import { applyAgentManifest } from "./scripts/build-config.js";
+import { createChromeManifest } from "./scripts/build-config.js";
+import { ensureTorsionfieldChannelConfig } from "./scripts/torsionfield-channel-config.mjs";
 
 const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
 
@@ -15,6 +16,7 @@ const isBeta = version.includes("-");
 const isReactTools = process.env.REACT_DEVTOOLS === "true";
 // agent 默认开启；正式版屏蔽由 scripts/pack.js 按版本判断后通过 SC_DISABLE_AGENT 声明。
 const enableAgent = process.env.SC_DISABLE_AGENT !== "true";
+const torsionfieldDevConfig = ensureTorsionfieldChannelConfig(dirname, process.env.SC_TORSIONFIELD_DEV === "true");
 
 // Target browsers, see: https://github.com/browserslist/browserslist
 // 依照 https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/userScripts#browser_compatibility
@@ -138,6 +140,8 @@ export default {
       "process.env.VI_TESTING": "'false'",
       "process.env.SC_RANDOM_KEY": `'${uuidv4()}'`,
       "process.env.SC_DISABLE_AGENT": `'${enableAgent ? "false" : "true"}'`,
+      "process.env.SC_TORSIONFIELD_DEV_TOKEN": JSON.stringify(torsionfieldDevConfig?.token ?? ""),
+      "process.env.SC_TORSIONFIELD_DEV_URL": JSON.stringify(torsionfieldDevConfig?.url ?? ""),
     }),
     new rspack.CopyRspackPlugin({
       patterns: [
@@ -146,7 +150,7 @@ export default {
           to: `${dist}/ext`,
           // 将manifest.json内版本号替换为package.json中版本号
           transform(content: Buffer) {
-            const manifest = applyAgentManifest(
+            const manifest = createChromeManifest(
               JSON.parse(content.toString()) as chrome.runtime.ManifestV3,
               enableAgent
             );

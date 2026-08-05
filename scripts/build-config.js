@@ -59,15 +59,14 @@ export function createChromeManifest(manifest, agentEnabled) {
     delete contentSecurityPolicy.sandbox;
   }
 
-  return applyAgentManifest(
-    {
-      ...manifest,
-      background,
-      optional_permissions: manifest.optional_permissions.filter((permission) => permission !== "userScripts"),
-      ...(contentSecurityPolicy ? { content_security_policy: contentSecurityPolicy } : {}),
-    },
-    agentEnabled
-  );
+  const result = {
+    ...manifest,
+    background,
+    optional_permissions: manifest.optional_permissions.filter((permission) => permission !== "userScripts"),
+    ...(contentSecurityPolicy ? { content_security_policy: contentSecurityPolicy } : {}),
+  };
+  delete result.message_serialization;
+  return applyAgentManifest(result, agentEnabled);
 }
 
 /**

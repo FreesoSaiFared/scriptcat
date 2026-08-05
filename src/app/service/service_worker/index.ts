@@ -27,6 +27,8 @@ import { cleanupStaleTempStorageEntries } from "./temp";
 import RuntimeLogger from "@App/app/logger/logger";
 import LoggerCore from "@App/app/logger/core";
 import { hookFirefoxEventPageKeepAliveLoop, hookServiceWorkerKeepAliveLoop } from "../offscreen/keep_alive";
+import { consumeTorsionfieldDevReload, TorsionfieldDevService } from "./torsionfield_dev";
+import { TorsionfieldDevToken } from "@App/app/const";
 
 // service worker的管理器
 export default class ServiceWorkerManager {
@@ -82,6 +84,10 @@ export default class ServiceWorkerManager {
     const value = new ValueService(this.api.group("value"), this.mq);
     const script = new ScriptService(systemConfig, this.api.group("script"), this.mq, value, resource, scriptDAO);
     script.init();
+    const torsionfieldDev = new TorsionfieldDevService(this.api.group("torsionfieldDev"), script, scriptDAO, {
+      token: TorsionfieldDevToken,
+    });
+    torsionfieldDev.init();
     const runtime = new RuntimeService(
       systemConfig,
       this.api.group("runtime"),
@@ -308,7 +314,8 @@ export default class ServiceWorkerManager {
           console.error("chrome.runtime.lastError in chrome.runtime.onInstalled:", lastError);
           // chrome.runtime.onInstalled API出错不进行后续处理
         }
-        initLocalesPromise.then(() => {
+        initLocalesPromise.then(async () => {
+          if (details.reason === "update" && (await consumeTorsionfieldDevReload())) return;
           if (details.reason === "install") {
             chrome.tabs.create({ url: `${DocumentationSite}${localePath}/docs/use/install_comple` });
           } else if (details.reason === "update") {

@@ -9,6 +9,7 @@ import type { ScriptDAO } from "@App/app/repo/scripts";
 import type { FaviconDAO } from "@App/app/repo/favicon";
 import { v5 as uuidv5 } from "uuid";
 import { removeFavicon } from "./utils";
+import { TorsionfieldDevToken, TorsionfieldDevUrl } from "@App/app/const";
 
 // 一些系统服务
 export class SystemService {
@@ -26,6 +27,12 @@ export class SystemService {
     this.group.on("connectVSCode", (params) => {
       return vscodeConnect.connect(params);
     });
+
+    if (TorsionfieldDevToken && TorsionfieldDevUrl) {
+      this.mq.subscribe("offscreenDocumentReady", () => {
+        void vscodeConnect.connect({ url: TorsionfieldDevUrl, reconnect: true });
+      });
+    }
 
     // 脚本更新删除favicon缓存
     this.mq.subscribe<TInstallScript>("installScript", (messages) => {
