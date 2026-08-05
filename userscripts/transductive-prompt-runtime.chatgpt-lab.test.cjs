@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const core = require('./transductive-prompt-runtime.chatgpt-lab.user.js');
+const core = require('./transductive-prompt-runtime.chatgpt-lab-core.js');
 
 const selfTest = core.runCoreSelfTest();
 assert.equal(selfTest.ok, true, selfTest.failures.join(', '));
