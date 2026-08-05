@@ -133,20 +133,22 @@ No staging-workflow changes were made in the lab branch because they belong to C
 
 ## Additive lab files
 
+- `userscripts/transductive-prompt-runtime.chatgpt-lab-core.js`
 - `userscripts/transductive-prompt-runtime.chatgpt-lab.user.js`
 - `userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs`
 - `scripts/start-chatgpt-torsionfield-lab.ps1`
 - `docs/chatgpt-lab/CODEX_MODIFICATIONS_REVIEW.md`
 
-The original Codex userscript and launcher remain unchanged.
+The original Codex userscript and launcher remain unchanged. The browser userscript imports the testable core through ScriptCat’s `@require` mechanism, while the Node test loads that same core directly.
 
 ## Verification performed
 
 - Node syntax check: passed
 - userscript core self-test: passed
 - focused Node test: 16 assertions passed
-- lab userscript SHA-256: `0c117a57d773d07adc14aff87d084b6bd74517c08c24976de265487fb2a7ed82`
-- focused test SHA-256: `05c40c20ac8478a40b300b7b46642f12866dfd58b716b5fb7f322a8b61992c43`
+- lab core SHA-256: `5790a5ceafed2bdb745fab1fd2c302ead7242a81ae82a18b14df3cc364a6775b`
+- browser userscript SHA-256: `81766d13c0284667500943b04f498dbe38ad348cf57b258a27c54c53ac056e1e`
+- focused test SHA-256: `73af53e9c92b07875329040779389701d13b8059dd874485c1a40c8bdfc96027`
 - lab launcher SHA-256: `9839e735acbd744cdae1b801be5c3ede4780537c3728dc3263a876a7bfa49a44`
 
 PowerShell is not installed in the managed Debian VM, so the launcher received static structural checks but has not yet been executed on Windows. The lab userscript has passed its pure-core tests but has not yet received a full live ChatGPT browser test. Those are the two precise remaining verification boundaries.
