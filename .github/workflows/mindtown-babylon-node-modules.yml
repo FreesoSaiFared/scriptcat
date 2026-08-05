@@ -1,0 +1,61 @@
+name: MindTown Babylon offline node modules
+
+on:
+  push:
+    paths:
+      - .github/workflows/mindtown-babylon-node-modules.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install exact source dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sha="$(git ls-remote https://github.com/BabylonJS/Babylon.js.git HEAD | awk '{print $1}')"
+          url="https://gh-proxy.com/https://github.com/BabylonJS/Babylon.js/archive/${sha}.zip"
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$url" -o source.zip
+          unzip -q source.zip -d unpacked
+          cd "unpacked/Babylon.js-${sha}"
+          npm ci --ignore-scripts --no-audit --no-fund
+          cd ../..
+          mkdir -p output
+          printf '%s\t%s\n' "$sha" "$url" > output/SOURCE_LOCK.tsv
+          tar -C "unpacked/Babylon.js-${sha}" -I 'zstd -T0 -3' -cf output/node-modules.tar.zst node_modules
+          split -b 440M -d -a 2 output/node-modules.tar.zst output/node-modules.tar.zst.part-
+          rm output/node-modules.tar.zst
+          ls -lh output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-babylon-node-modules-manifest
+          path: output/SOURCE_LOCK.tsv
+          retention-days: 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-babylon-node-modules-part-00
+          path: output/node-modules.tar.zst.part-00
+          compression-level: 0
+          retention-days: 2
+      - if: hashFiles('output/node-modules.tar.zst.part-01') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-babylon-node-modules-part-01
+          path: output/node-modules.tar.zst.part-01
+          compression-level: 0
+          retention-days: 2
+      - if: hashFiles('output/node-modules.tar.zst.part-02') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-babylon-node-modules-part-02
+          path: output/node-modules.tar.zst.part-02
+          compression-level: 0
+          retention-days: 2
