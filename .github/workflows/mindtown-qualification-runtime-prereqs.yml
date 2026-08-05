@@ -1,0 +1,199 @@
+name: MindTown remaining offline build prerequisites
+
+on:
+  push:
+    paths:
+      - .github/workflows/mindtown-qualification-runtime-prereqs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: threejs
+            repo: mrdoob/three.js
+          - slug: babylonjs
+            repo: BabylonJS/Babylon.js
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Populate exact npm cache
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sha="$(git ls-remote "https://github.com/${{ matrix.repo }}.git" HEAD | awk '{print $1}')"
+          url="https://gh-proxy.com/https://github.com/${{ matrix.repo }}/archive/${sha}.zip"
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$url" -o source.zip
+          unzip -q source.zip -d unpacked
+          src="$(find unpacked -mindepth 1 -maxdepth 1 -type d | head -1)"
+          cd "$src"
+          npm ci --ignore-scripts --no-audit --no-fund
+          cd ../..
+          mkdir -p output
+          printf '%s\t%s\t%s\n' '${{ matrix.repo }}' "$sha" "$url" > output/SOURCE_LOCK.tsv
+          tar -C "$HOME" -I 'zstd -T0 -3' -cf output/npm-cache.tar.zst .npm
+          split -b 440M -d -a 2 output/npm-cache.tar.zst output/npm-cache.tar.zst.part-
+          rm output/npm-cache.tar.zst
+          ls -lh output
+      - name: Upload cache manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-npm-cache-manifest
+          path: output/SOURCE_LOCK.tsv
+          retention-days: 2
+      - name: Upload cache part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-npm-cache-part-00
+          path: output/npm-cache.tar.zst.part-00
+          compression-level: 0
+          retention-days: 2
+      - name: Upload cache part 01
+        if: hashFiles('output/npm-cache.tar.zst.part-01') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-npm-cache-part-01
+          path: output/npm-cache.tar.zst.part-01
+          compression-level: 0
+          retention-days: 2
+      - name: Upload cache part 02
+        if: hashFiles('output/npm-cache.tar.zst.part-02') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-npm-cache-part-02
+          path: output/npm-cache.tar.zst.part-02
+          compression-level: 0
+          retention-days: 2
+      - name: Upload cache part 03
+        if: hashFiles('output/npm-cache.tar.zst.part-03') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-${{ matrix.slug }}-npm-cache-part-03
+          path: output/npm-cache.tar.zst.part-03
+          compression-level: 0
+          retention-days: 2
+
+  agent-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Prepare source, dependencies, and vendored Rust crates
+        shell: bash
+        run: |
+          set -euxo pipefail
+          corepack enable
+          corepack prepare pnpm@11.1.3 --activate
+          sha="$(git ls-remote https://github.com/vercel-labs/agent-browser.git HEAD | awk '{print $1}')"
+          url="https://gh-proxy.com/https://github.com/vercel-labs/agent-browser/archive/${sha}.zip"
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$url" -o source.zip
+          unzip -q source.zip -d unpacked
+          mv "unpacked/agent-browser-${sha}" repo
+          cd repo
+          corepack pnpm install --frozen-lockfile --ignore-scripts
+          mkdir -p .cargo
+          cargo vendor --manifest-path cli/Cargo.toml vendor > .cargo/config.toml
+          cd ..
+          mkdir -p output
+          printf '%s\t%s\t%s\n' 'vercel-labs/agent-browser' "$sha" "$url" > output/SOURCE_LOCK.tsv
+          tar -I 'zstd -T0 -3' -cf output/prepared.tar.zst repo
+          split -b 440M -d -a 2 output/prepared.tar.zst output/prepared.tar.zst.part-
+          rm output/prepared.tar.zst
+          ls -lh output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-agent-browser-prepared-manifest
+          path: output/SOURCE_LOCK.tsv
+          retention-days: 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-agent-browser-prepared-part-00
+          path: output/prepared.tar.zst.part-00
+          compression-level: 0
+          retention-days: 2
+      - if: hashFiles('output/prepared.tar.zst.part-01') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-agent-browser-prepared-part-01
+          path: output/prepared.tar.zst.part-01
+          compression-level: 0
+          retention-days: 2
+
+  recast-prereqs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+      - name: Prepare Emscripten and pinned RecastNavigation source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          recast_sha=599fd0f023181c0a484df2a18cf1d75a3553852e
+          url="https://gh-proxy.com/https://github.com/isaac-mason/recastnavigation/archive/${recast_sha}.zip"
+          mkdir -p payload/recastnavigation output
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$url" -o recast.zip
+          unzip -q recast.zip -d payload
+          mv "payload/recastnavigation-${recast_sha}" payload/recastnavigation/source
+          cp -a "$EMSDK" payload/emsdk
+          emcc --version > output/VERSIONS.txt
+          printf '%s\t%s\n' "$recast_sha" "$url" > output/RECAST_SOURCE_LOCK.tsv
+          tar -I 'zstd -T0 -3' -cf output/recast-prereqs.tar.zst payload
+          split -b 440M -d -a 2 output/recast-prereqs.tar.zst output/recast-prereqs.tar.zst.part-
+          rm output/recast-prereqs.tar.zst
+          ls -lh output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-recast-prereqs-manifest
+          path: |
+            output/VERSIONS.txt
+            output/RECAST_SOURCE_LOCK.tsv
+          retention-days: 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-recast-prereqs-part-00
+          path: output/recast-prereqs.tar.zst.part-00
+          compression-level: 0
+          retention-days: 2
+      - if: hashFiles('output/recast-prereqs.tar.zst.part-01') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-recast-prereqs-part-01
+          path: output/recast-prereqs.tar.zst.part-01
+          compression-level: 0
+          retention-days: 2
+
+  python312:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Package portable Python root
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python_root="$(dirname "$(dirname "$(readlink -f "$(command -v python)")")")"
+          mkdir -p output
+          python --version > output/VERSION.txt
+          tar -C "$(dirname "$python_root")" -I 'zstd -T0 -3' -cf output/python312.tar.zst "$(basename "$python_root")"
+          du -h output/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-python312-runtime
+          path: output/
+          compression-level: 0
+          retention-days: 2
