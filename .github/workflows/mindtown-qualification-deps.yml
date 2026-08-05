@@ -1,0 +1,138 @@
+name: MindTown qualification offline dependencies
+
+on:
+  push:
+    paths:
+      - .github/workflows/mindtown-qualification-deps.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Prepare package manager runtimes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export COREPACK_HOME="$HOME/.cache/node/corepack"
+          corepack enable
+          corepack prepare pnpm@9.15.1 --activate
+          corepack prepare pnpm@10.34.1 --activate
+          corepack prepare pnpm@11.1.3 --activate
+          corepack prepare yarn@4.1.1 --activate
+          corepack prepare yarn@4.17.0 --activate
+          node_root="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")"
+          mkdir -p runtime
+          tar -C "$(dirname "$node_root")" -I 'zstd -T0 -3' -cf runtime/node24.tar.zst "$(basename "$node_root")"
+          tar -C "$HOME" -I 'zstd -T0 -3' -cf runtime/corepack-home.tar.zst .cache/node/corepack
+          tar -C "$HOME" -I 'zstd -T0 -3' -cf runtime/rust-toolchain.tar.zst .cargo .rustup
+          printf '%s\n' "$node_root" > runtime/NODE_ROOT.txt
+          node --version | tee runtime/VERSIONS.txt
+          npm --version | tee -a runtime/VERSIONS.txt
+          rustc --version | tee -a runtime/VERSIONS.txt
+          cargo --version | tee -a runtime/VERSIONS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-offline-runtime-toolchains
+          path: runtime/
+          compression-level: 0
+          retention-days: 2
+
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: playcanvas__engine
+            repo: playcanvas/engine
+            manager: npm
+            install: npm ci --ignore-scripts
+          - slug: playcanvas__editor
+            repo: playcanvas/editor
+            manager: npm
+            install: npm ci --ignore-scripts
+          - slug: playcanvas__editor-mcp-server
+            repo: playcanvas/editor-mcp-server
+            manager: npm
+            install: npm ci --ignore-scripts
+          - slug: scriptscat__scriptcat
+            repo: scriptscat/scriptcat
+            manager: pnpm10
+            install: pnpm install --frozen-lockfile --ignore-scripts
+          - slug: srbhptl39__MCP-SuperAssistant
+            repo: srbhptl39/MCP-SuperAssistant
+            manager: pnpm9
+            install: pnpm install --frozen-lockfile --ignore-scripts
+          - slug: isaac-mason__recast-navigation-js
+            repo: isaac-mason/recast-navigation-js
+            manager: yarn41
+            install: yarn install --immutable
+          - slug: donmccurdy__glTF-Transform
+            repo: donmccurdy/glTF-Transform
+            manager: yarn417
+            install: yarn install --immutable
+          - slug: vercel-labs__agent-browser
+            repo: vercel-labs/agent-browser
+            manager: pnpm11-rust
+            install: pnpm install --frozen-lockfile --ignore-scripts
+          - slug: hermes-agent-org__hermes
+            repo: hermes-agent-org/hermes
+            manager: uv
+            install: uv sync --frozen --no-dev
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.manager == 'pnpm11-rust'
+      - name: Download source through gh-proxy.com and install dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export COREPACK_HOME="$HOME/.cache/node/corepack"
+          sha="$(git ls-remote "https://github.com/${{ matrix.repo }}.git" HEAD | awk '{print $1}')"
+          url="https://gh-proxy.com/https://github.com/${{ matrix.repo }}/archive/${sha}.zip"
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$url" -o source.zip
+          unzip -tq source.zip
+          unzip -q source.zip -d unpacked
+          src="$(find unpacked -mindepth 1 -maxdepth 1 -type d | head -1)"
+          mv "$src" repo
+          case "${{ matrix.manager }}" in
+            npm) ;;
+            pnpm9) corepack prepare pnpm@9.15.1 --activate ;;
+            pnpm10) corepack prepare pnpm@10.34.1 --activate ;;
+            pnpm11-rust) corepack prepare pnpm@11.1.3 --activate ;;
+            yarn41) corepack prepare yarn@4.1.1 --activate ;;
+            yarn417) corepack prepare yarn@4.17.0 --activate ;;
+            uv) ;;
+          esac
+          cd repo
+          ${{ matrix.install }}
+          if [ "${{ matrix.manager }}" = pnpm11-rust ]; then
+            mkdir -p .cargo
+            cargo vendor vendor > .cargo/config.toml
+          fi
+          cd ..
+          mkdir -p prepared
+          printf '%s\t%s\t%s\n' '${{ matrix.repo }}' "$sha" "$url" > prepared/SOURCE_LOCK.tsv
+          sha256sum source.zip > prepared/SOURCE_ARCHIVE_SHA256
+          tar -I 'zstd -T0 -3' -cf "prepared/${{ matrix.slug }}.tar.zst" repo
+          du -h prepared/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtown-prepared-${{ matrix.slug }}
+          path: prepared/
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
