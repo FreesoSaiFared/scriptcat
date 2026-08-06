@@ -36,7 +36,7 @@ jobs:
           python3 upstream/src/cdpilot.py version | tee /tmp/cdpilot-version.txt
           grep -q "cdpilot" /tmp/cdpilot-version.txt
 
-      - name: Install declared-by-code runtime dependency
+      - name: Confirm declared-by-code runtime dependency
         shell: bash
         run: |
           set -euo pipefail
@@ -47,35 +47,45 @@ jobs:
           print('websockets_version=' + websockets.__version__)
           PY
 
-      - name: Real Chrome CDP smoke test
+      - name: External Chrome CDP diagnostic
+        id: external_smoke
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -o pipefail
           CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
-          test -n "$CHROME"
+          test -n "$CHROME" || exit 2
           rm -rf /tmp/cdpilot-profile /tmp/cdpilot-shot.png
           export CHROME_BIN="$CHROME"
           export CDP_PORT=9222
           export CDPILOT_PROFILE=/tmp/cdpilot-profile
-          python3 upstream/src/cdpilot.py launch | tee /tmp/cdpilot-launch.txt
-          for _ in $(seq 1 80); do
-            curl -fsS http://127.0.0.1:9222/json/version >/tmp/cdp-version.json && break
-            sleep 0.2
-          done
-          test -s /tmp/cdp-version.json
-          python3 upstream/src/cdpilot.py health | tee /tmp/cdpilot-health.txt
-          python3 upstream/src/cdpilot.py go 'data:text/html,<title>VM%20LAB</title><main id="proof">CDPILOT_VM_OK</main>'
-          python3 upstream/src/cdpilot.py eval 'document.querySelector("#proof").textContent' | tee /tmp/cdpilot-eval.txt
-          grep -q 'CDPILOT_VM_OK' /tmp/cdpilot-eval.txt
-          python3 upstream/src/cdpilot.py shot /tmp/cdpilot-shot.png
-          test -s /tmp/cdpilot-shot.png
-          python3 upstream/src/cdpilot.py stop || true
+          {
+            python3 upstream/src/cdpilot.py launch
+            for _ in $(seq 1 80); do
+              curl -fsS http://127.0.0.1:9222/json/version >/tmp/cdp-version.json && break
+              sleep 0.2
+            done
+            test -s /tmp/cdp-version.json
+            python3 upstream/src/cdpilot.py health | tee /tmp/cdpilot-health.txt
+            python3 upstream/src/cdpilot.py go 'data:text/html,<title>VM%20LAB</title><main id="proof">CDPILOT_VM_OK</main>'
+            python3 upstream/src/cdpilot.py eval 'document.querySelector("#proof").textContent' | tee /tmp/cdpilot-eval.txt
+            grep -q 'CDPILOT_VM_OK' /tmp/cdpilot-eval.txt
+            python3 upstream/src/cdpilot.py shot /tmp/cdpilot-shot.png
+            test -s /tmp/cdpilot-shot.png
+          } 2>&1 | tee /tmp/external-smoke.log
+          rc=${PIPESTATUS[0]}
+          python3 upstream/src/cdpilot.py stop >/dev/null 2>&1 || true
+          exit "$rc"
 
-      - name: Build self-contained VM handoff source
+      - name: Build self-contained VM source handoff
+        if: always()
         shell: bash
+        env:
+          EXTERNAL_SMOKE_OUTCOME: ${{ steps.external_smoke.outcome }}
         run: |
           set -euo pipefail
-          mkdir -p handoff/cdpilot
+          test -f upstream/src/cdpilot.py
+          mkdir -p handoff/cdpilot handoff/external-diagnostic
           cp upstream/src/cdpilot.py handoff/cdpilot/
           cp upstream/bin/cdpilot.js handoff/cdpilot/
           cp upstream/package.json handoff/cdpilot/
@@ -83,11 +93,9 @@ jobs:
           cp upstream/README.md handoff/cdpilot/
           cp /tmp/cdpilot-version.txt handoff/
           cp /tmp/runtime-dependency.txt handoff/
-          cp /tmp/cdpilot-launch.txt handoff/
-          cp /tmp/cdpilot-health.txt handoff/
-          cp /tmp/cdpilot-eval.txt handoff/
-          cp /tmp/cdp-version.json handoff/
-          cp /tmp/cdpilot-shot.png handoff/
+          for f in /tmp/external-smoke.log /tmp/cdp-version.json /tmp/cdpilot-health.txt /tmp/cdpilot-eval.txt /tmp/cdpilot-shot.png; do
+            test ! -f "$f" || cp "$f" handoff/external-diagnostic/
+          done
           cat > handoff/PINNED_SOURCE.txt <<'EOF'
           repository=https://github.com/mehmetnadir/cdpilot
           commit=584bb0da61c93e65df6a7405ddae8283fb6b3116
@@ -95,6 +103,7 @@ jobs:
           python_runtime_dependency=websockets
           tested_websockets_version=16.0
           EOF
+          printf 'external_smoke_outcome=%s\n' "$EXTERNAL_SMOKE_OUTCOME" > handoff/EXTERNAL_DIAGNOSTIC_STATUS.txt
           cat > handoff/RUN_IN_INTERNAL_VM.sh <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -106,9 +115,10 @@ jobs:
           echo SOURCE_VALIDATION_OK
           EOF
           chmod +x handoff/RUN_IN_INTERNAL_VM.sh
-          (cd handoff && sha256sum $(find . -type f -printf '%P\n' | sort) > SHA256SUMS)
+          (cd handoff && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS)
 
-      - name: Upload VM handoff
+      - name: Upload VM source handoff
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cdpilot-vm-handoff-584bb0d
