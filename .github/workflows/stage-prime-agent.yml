@@ -1,0 +1,33 @@
+name: Stage Prime Agent source through gh-proxy
+
+on:
+  push:
+    branches:
+      - chatgpt/prime-agent-stage-20260806
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download pinned source through gh-proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://gh-proxy.com/https://github.com/PrimeIntellect-ai/prime-agent/archive/0e0d23391bcd879f1aea70dbda4d07dda7970b34.zip'
+          curl -fL --retry 5 --retry-all-errors --connect-timeout 20 "$url" -o prime-agent-0e0d2339.zip
+          unzip -tq prime-agent-0e0d2339.zip
+          sha256sum prime-agent-0e0d2339.zip | tee SHA256SUMS
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prime-agent-source-0e0d2339
+          path: |
+            prime-agent-0e0d2339.zip
+            SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
