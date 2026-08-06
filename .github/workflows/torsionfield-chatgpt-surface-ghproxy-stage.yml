@@ -1,0 +1,59 @@
+name: Torsionfield ChatGPT surface source staging through gh-proxy
+
+on:
+  push:
+    paths:
+      - .github/workflows/torsionfield-chatgpt-surface-ghproxy-stage.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-exact-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Fetch the exact isolated-branch commit through gh-proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staged-source staged-evidence extracted
+
+          # WHY: the internal ChatGPT VM is deliberately not the Internet-facing
+          # agent. This runner performs the network acquisition, while the VM later
+          # verifies and executes the immutable artifact. GITHUB_SHA is used rather
+          # than a moving branch name so a later branch update cannot silently alter
+          # the bytes being tested.
+          upstream="https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"
+          proxied="https://gh-proxy.com/${upstream}"
+          printf '%s\n' "${GITHUB_SHA}" > staged-evidence/COMMIT_SHA
+          printf '%s\n' "${upstream}" > staged-evidence/UPSTREAM_URL
+          printf '%s\n' "${proxied}" > staged-evidence/GH_PROXY_URL
+          date -u --iso-8601=seconds > staged-evidence/FETCHED_AT_UTC
+
+          curl --fail --location --retry 5 --retry-all-errors \
+            --connect-timeout 20 --max-time 600 \
+            "${proxied}" \
+            --output "staged-source/scriptcat-${GITHUB_SHA}.tar.gz"
+
+          sha256sum staged-source/* | tee staged-evidence/SOURCE_SHA256SUMS
+          tar -tzf staged-source/scriptcat-${GITHUB_SHA}.tar.gz \
+            | sed -n '1,200p' > staged-evidence/ARCHIVE_PATHS_HEAD.txt
+          tar -xzf staged-source/scriptcat-${GITHUB_SHA}.tar.gz -C extracted
+
+          # POSTCONDITION: the archive must contain the workflow file that caused
+          # this run. That proves we fetched this commit rather than an older
+          # default-branch archive or an HTML error page with a successful status.
+          test "$(find extracted -type f -path '*/.github/workflows/torsionfield-chatgpt-surface-ghproxy-stage.yml' | wc -l)" -eq 1
+          find extracted -type f -printf '%P\n' | sort > staged-evidence/EXTRACTED_FILES.txt
+
+      - name: Upload exact source and acquisition evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: torsionfield-chatgpt-surface-ghproxy-${{ github.sha }}
+          path: |
+            staged-source/
+            staged-evidence/
+          compression-level: 0
+          retention-days: 3
