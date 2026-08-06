@@ -55,10 +55,10 @@ const installedMetadata = fs.readFileSync(
   path.join(__dirname, 'transductive-prompt-runtime.chatgpt-lab.user.js'),
   'utf8',
 );
-assert.match(installedMetadata, /@version\s+0\.3\.2-live-surface/);
-assert.match(installedMetadata, /@require\s+https:\/\/raw\.githubusercontent\.com\/FreesoSaiFared\/scriptcat\/a9942fd4b3ba8b02ea396208f021d257f5e8b9ef\/userscripts\/torsionfield-chatgpt-conversation-surface\.js/);
-assert.match(installedMetadata, /@require\s+https:\/\/raw\.githubusercontent\.com\/FreesoSaiFared\/scriptcat\/a9942fd4b3ba8b02ea396208f021d257f5e8b9ef\/userscripts\/transductive-prompt-runtime\.chatgpt-lab-core\.js/);
-assert.doesNotMatch(installedMetadata, /refs\/heads\/chatgpt\/torsionfield-chatgpt-surface-20260806/);
+assert.match(installedMetadata, /@version\s+0\.3\.3-authoritative-port/);
+assert.match(installedMetadata, /@require\s+https:\/\/raw\.githubusercontent\.com\/FreesoSaiFared\/scriptcat\/9c2092795a328f6535584c3215c2a3aacbf5e52a\/userscripts\/torsionfield-chatgpt-conversation-surface\.js/);
+assert.match(installedMetadata, /@require\s+https:\/\/raw\.githubusercontent\.com\/FreesoSaiFared\/scriptcat\/9c2092795a328f6535584c3215c2a3aacbf5e52a\/userscripts\/transductive-prompt-runtime\.chatgpt-lab-core\.js/);
+assert.doesNotMatch(installedMetadata, /raw\.githubusercontent\.com\/FreesoSaiFared\/scriptcat\/refs\/heads\//);
 
 console.log(JSON.stringify({
   ok: true,

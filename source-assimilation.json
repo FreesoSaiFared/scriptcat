@@ -29,7 +29,7 @@
       "branch": "chatgpt/torsionfield-chatgpt-surface-20260806",
       "old_base_commit": "3a6c7132e3a4436d8cd631d570e6f635418b6aad",
       "last_inspected_commit": "52db2e02fee42728fa58075af2b35a333a0234c6",
-      "last_integrated_commit": null,
+      "last_integrated_commit": "9c2092795a328f6535584c3215c2a3aacbf5e52a",
       "relevant_paths": [
         "userscripts/torsionfield-chatgpt-conversation-surface.js",
         "userscripts/transductive-prompt-runtime.chatgpt-lab-core.js",
@@ -46,5 +46,11 @@
       ],
       "license": "same repository GPL-3.0 lineage; see LICENSE"
     }
-  ]
+  ],
+  "current_integration": {
+    "branch": "chatgpt/torsionfield-chatgpt-surface-authoritative-port-20260806",
+    "base_commit": "a5d48ca4df6fd620a282c9a6ae4b6c0b83f6e057",
+    "source_import_commit": "9c2092795a328f6535584c3215c2a3aacbf5e52a",
+    "userscript_version": "0.3.3-authoritative-port"
+  }
 }

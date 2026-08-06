@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Transductive Prompt Runtime — ChatGPT Lab
 // @namespace    https://transductive.science/
-// @version      0.3.2-live-surface
+// @version      0.3.3-authoritative-port
 // @description  Transactional prompt contracts and finalized-response gates for ChatGPT.
 // @author       Friso + ChatGPT Lab
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-idle
-// @require      https://raw.githubusercontent.com/FreesoSaiFared/scriptcat/a9942fd4b3ba8b02ea396208f021d257f5e8b9ef/userscripts/torsionfield-chatgpt-conversation-surface.js
-// @require      https://raw.githubusercontent.com/FreesoSaiFared/scriptcat/a9942fd4b3ba8b02ea396208f021d257f5e8b9ef/userscripts/transductive-prompt-runtime.chatgpt-lab-core.js
+// @require      https://raw.githubusercontent.com/FreesoSaiFared/scriptcat/9c2092795a328f6535584c3215c2a3aacbf5e52a/userscripts/torsionfield-chatgpt-conversation-surface.js
+// @require      https://raw.githubusercontent.com/FreesoSaiFared/scriptcat/9c2092795a328f6535584c3215c2a3aacbf5e52a/userscripts/transductive-prompt-runtime.chatgpt-lab-core.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
