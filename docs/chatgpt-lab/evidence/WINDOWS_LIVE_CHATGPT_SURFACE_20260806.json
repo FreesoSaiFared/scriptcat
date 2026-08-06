@@ -1,0 +1,55 @@
+{
+  "schema": "TORSIONFIELD_CHATGPT_SURFACE_LIVE_ACCEPTANCE/1",
+  "status": "PROVEN",
+  "recordedAt": "2026-08-06T17:03:12.826Z",
+  "repository": "FreesoSaiFared/scriptcat",
+  "branch": "chatgpt/torsionfield-chatgpt-surface-20260806",
+  "runtimeCommit": "4a43c0dc32a32dc97031d6de3a1413c06071fe00",
+  "browser": "Playwright Chromium 149.0.7827.55 on Windows",
+  "freshBrowserStart": true,
+  "manualPageReloadBeforeHarness": false,
+  "extension": {
+    "name": "ScriptCat Beta",
+    "version": "1.5.0.1100",
+    "id": "jikpfcegceaoondgnomhpopjgoaljndo",
+    "location": "UNPACKED",
+    "userScriptsAccess": true
+  },
+  "userscriptVersion": "0.3.2-live-surface",
+  "surfaceVersion": "0.1.1-live",
+  "submission": {
+    "beforeUserTurns": 0,
+    "beforeAssistantTurns": 0,
+    "afterUserTurns": 1,
+    "afterAssistantTurns": 1,
+    "checks": {
+      "oneNewUserTurn": true,
+      "oneNewAssistantTurn": true,
+      "oneConstraintContract": true,
+      "assistantContainsNonce": true,
+      "composerEmpty": true,
+      "receiptPresent": true,
+      "receiptConfirmed": true
+    },
+    "receiptStatus": "CONFIRMED",
+    "receiptReason": "contract-injected:prompt-and-settled-assistant-effect-observed",
+    "conversationKeySha256": "1e2a731bbcd8318758dbef4ecf2e1330a306a129a6064415e1aad459a1df3078",
+    "resultHash": "a749ed548d4f03b4"
+  },
+  "draftPreservation": {
+    "ok": true,
+    "status": "HUMAN_DRAFT_PRESENT",
+    "draftSha256": "4166934e0ddcea3b158fdfd63f7789630ed6b7f42b8d8106bef44e0f6b896808",
+    "exactBytesPreserved": true,
+    "submitted": false,
+    "clearedOnlyOwnedDraft": true
+  },
+  "excludedFromRepositoryEvidence": [
+    "authenticated profile bytes",
+    "cookies",
+    "account identifiers",
+    "sidebar/chat history",
+    "full-page screenshot",
+    "verbose Chromium signin log"
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "schema": "TORSIONFIELD_SOURCE_ASSIMILATION/1",
+  "project": "torsionfield-scriptcat",
+  "sources": [
+    {
+      "name": "scriptcat",
+      "role": "primary upstream",
+      "url": "https://github.com/scriptcat/scriptcat",
+      "branch": "main",
+      "last_inspected_commit": "9686b3247ff72a80b2af3e8aafba19474f5260f8",
+      "last_integrated_commit": "9686b3247ff72a80b2af3e8aafba19474f5260f8",
+      "relevant_paths": [
+        "src/app/service/service_worker",
+        "src/app/service/offscreen",
+        "scripts",
+        "torsion-node"
+      ],
+      "borrowed_or_required_behaviour": [
+        "Manifest V3 userscript installation and execution",
+        "chrome.userScripts registration",
+        "service-worker lifecycle"
+      ],
+      "license": "GPL-3.0; see LICENSE"
+    },
+    {
+      "name": "torsionfield-chatgpt-conversation-surface",
+      "role": "donor and behaviour oracle",
+      "url": "https://github.com/FreesoSaiFared/scriptcat",
+      "branch": "chatgpt/torsionfield-chatgpt-surface-20260806",
+      "old_base_commit": "3a6c7132e3a4436d8cd631d570e6f635418b6aad",
+      "last_inspected_commit": "52db2e02fee42728fa58075af2b35a333a0234c6",
+      "last_integrated_commit": null,
+      "relevant_paths": [
+        "userscripts/torsionfield-chatgpt-conversation-surface.js",
+        "userscripts/transductive-prompt-runtime.chatgpt-lab-core.js",
+        "userscripts/transductive-prompt-runtime.chatgpt-lab.user.js",
+        "scripts/live-chatgpt-surface-acceptance.cjs"
+      ],
+      "borrowed_or_required_behaviour": [
+        "exact pre-submit conversation baseline",
+        "human-draft preservation",
+        "settled-turn observation",
+        "CONFIRMED, PARTIAL, NOT_APPLIED and UNKNOWN_OUTCOME classification",
+        "retry only after NOT_APPLIED",
+        "citation-preserving assistant evidence"
+      ],
+      "license": "same repository GPL-3.0 lineage; see LICENSE"
+    }
+  ]
+}

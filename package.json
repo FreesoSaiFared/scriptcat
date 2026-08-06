@@ -17,6 +17,8 @@
     "torsionfield-script": "node scripts/torsionfield-script.mjs",
     "verify:torsionfield-core": "node scripts/verify-torsionfield-core.mjs",
     "verify:torsion-node": "node scripts/verify-torsion-node.mjs",
+    "test:chatgpt-surface": "node userscripts/torsionfield-chatgpt-conversation-surface.test.cjs && node userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs",
+    "verify:chatgpt-surface": "node scripts/live-chatgpt-surface-acceptance.cjs",
     "pack": "node ./scripts/pack.js",
     "typecheck": "tsc --noEmit",
     "lint": "concurrently -g \"prettier --check --cache \\\"**/*.{ts,tsx,js,jsx,mjs}\\\"\" \"tsc --noEmit\" \"pnpm run check:i18n\" \"pnpm run check:issue-templates\" && eslint . --cache --cache-location .eslintcache",

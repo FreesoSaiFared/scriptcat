@@ -14,6 +14,7 @@
 | [`architecture.md`](./architecture.md) | 内部原理总览:多进程模型、消息传递;各子系统深入拆到 [`references/architecture-services.md`](./references/architecture-services.md)(服务层)、[`references/architecture-data.md`](./references/architecture-data.md)(数据层)、[`references/architecture-gm-api.md`](./references/architecture-gm-api.md)(GM API)、[`references/architecture-execution.md`](./references/architecture-execution.md)(脚本执行)、[`references/architecture-build.md`](./references/architecture-build.md)(构建管线)、[`references/architecture-agent.md`](./references/architecture-agent.md)(Agent 子系统)。 |
 | [`cloud-sync.md`](./cloud-sync.md) | 云同步实现说明:同步文件语义、主流程、状态合并、provider 差异、错误分类、retry 策略和维护注意事项。 |
 | [`DOC-MAINTENANCE.md`](./DOC-MAINTENANCE.md) | 文档维护与事实核对指南:组织规则、逐条核对清单、跨文档政策一致性核对、隐私清理、以及在 resolved final tree 上的复核方法,覆盖全部 tracked 的 agent/contributor Markdown(不止 `AGENTS.md` + `docs/*`,还包括 `.github/*.md`、package-local README)。**改/审文档前先读。** |
+| [`chatgpt-lab/WINDOWS_LIVE_CHATGPT_SURFACE_ACCEPTANCE.md`](./chatgpt-lab/WINDOWS_LIVE_CHATGPT_SURFACE_ACCEPTANCE.md) | Torsionfield ChatGPT ConversationSurface 的隔离开发、真实认证页面验收、失败修复与保留边界。 |
 
 ## 翻译 / Translation
 
