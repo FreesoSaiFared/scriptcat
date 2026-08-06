@@ -14,7 +14,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "0.2.0-lab"
+$LauncherVersion = "0.2.1-torsionfield-build"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ExtensionPath) { $ExtensionPath = Join-Path $repoRoot "dist\ext" }
@@ -91,8 +91,8 @@ function Build-ExtensionIfNeeded {
       & corepack pnpm install --frozen-lockfile
       if ($LASTEXITCODE -ne 0) { throw "pnpm install failed with exit code $LASTEXITCODE" }
     }
-    & corepack pnpm run build
-    if ($LASTEXITCODE -ne 0) { throw "ScriptCat build failed with exit code $LASTEXITCODE" }
+    & corepack pnpm run build:torsionfield
+    if ($LASTEXITCODE -ne 0) { throw "ScriptCat Torsionfield build failed with exit code $LASTEXITCODE" }
   } finally {
     Pop-Location
   }

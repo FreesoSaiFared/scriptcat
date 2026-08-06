@@ -17,7 +17,7 @@
     "torsionfield-script": "node scripts/torsionfield-script.mjs",
     "verify:torsionfield-core": "node scripts/verify-torsionfield-core.mjs",
     "verify:torsion-node": "node scripts/verify-torsion-node.mjs",
-    "test:chatgpt-surface": "node userscripts/torsionfield-chatgpt-conversation-surface.test.cjs && node userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs",
+    "test:chatgpt-surface": "node userscripts/torsionfield-chatgpt-conversation-surface.test.cjs && node userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs && node scripts/start-chatgpt-torsionfield-lab.test.cjs",
     "verify:chatgpt-surface": "node scripts/live-chatgpt-surface-acceptance.cjs",
     "pack": "node ./scripts/pack.js",
     "typecheck": "tsc --noEmit",
