@@ -133,6 +133,7 @@ interface TorsionfieldDevServiceOptions {
   token: string;
   verifyExecution?: (request: TorsionfieldExecutionVerificationRequest) => Promise<TorsionfieldExecutionVerification>;
   reloadRuntime?: () => Promise<void>;
+  reconnectRuntime?: () => Promise<void>;
 }
 
 const noVerification = (): TorsionfieldExecutionVerification => ({ status: "not_run" });
@@ -906,8 +907,10 @@ export class TorsionfieldDevService {
       [RELOAD_KEY]: { operationId: request.operationId, expiresAt: Date.now() + RELOAD_TTL_MS } satisfies ReloadMarker,
     });
     const reloadRuntime = this.options.reloadRuntime ?? restartTorsionfieldOffscreenRuntime;
+    const reconnectRuntime = this.options.reconnectRuntime ?? (() => Promise.resolve());
     setTimeout(() => {
       void reloadRuntime()
+        .then(reconnectRuntime)
         .then(() => chrome.storage.local.remove(RELOAD_KEY))
         .catch(async (error) => {
           const failed = {

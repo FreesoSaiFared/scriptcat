@@ -13,6 +13,8 @@ import { TorsionfieldDevToken, TorsionfieldDevUrl } from "@App/app/const";
 
 // 一些系统服务
 export class SystemService {
+  private readonly vscodeConnect: VscodeConnectClient;
+
   constructor(
     private systemConfig: SystemConfig,
     private group: Group,
@@ -20,24 +22,28 @@ export class SystemService {
     private mq: IMessageQueue,
     private scriptDAO: ScriptDAO,
     private faviconDAO: FaviconDAO
-  ) {}
+  ) {
+    this.vscodeConnect = new VscodeConnectClient(msgSender);
+  }
+
+  connectTorsionfield(): Promise<void> {
+    if (!(TorsionfieldDevToken && TorsionfieldDevUrl)) return Promise.resolve();
+    return this.vscodeConnect.connect({
+      url: TorsionfieldDevUrl,
+      reconnect: true,
+      torsionfield: { token: TorsionfieldDevToken },
+    });
+  }
 
   init() {
-    const vscodeConnect = new VscodeConnectClient(this.msgSender);
     const torsionfieldEnabled = Boolean(TorsionfieldDevToken && TorsionfieldDevUrl);
     this.group.on("connectVSCode", (params) => {
-      return vscodeConnect.connect(params);
+      return this.vscodeConnect.connect(params);
     });
 
     if (torsionfieldEnabled) {
       const connectTorsionfield = () => {
-        void vscodeConnect
-          .connect({
-            url: TorsionfieldDevUrl,
-            reconnect: true,
-            torsionfield: { token: TorsionfieldDevToken },
-          })
-          .catch(() => {});
+        void this.connectTorsionfield().catch(() => {});
       };
       this.mq.subscribe("offscreenDocumentReady", connectTorsionfield);
       this.mq.subscribe<{ verified: boolean }>("preparationOffscreen", (data) => {
@@ -103,7 +109,7 @@ export class SystemService {
         if (!init) {
           if (await this.systemConfig.getVscodeReconnect()) {
             // 调用连接
-            vscodeConnect.connect({
+            this.vscodeConnect.connect({
               url: await this.systemConfig.getVscodeUrl(),
               reconnect: true,
             });

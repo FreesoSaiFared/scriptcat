@@ -84,8 +84,17 @@ export default class ServiceWorkerManager {
     const value = new ValueService(this.api.group("value"), this.mq);
     const script = new ScriptService(systemConfig, this.api.group("script"), this.mq, value, resource, scriptDAO);
     script.init();
+    const system = new SystemService(
+      systemConfig,
+      this.api.group("system"),
+      this.offscreenSend,
+      this.mq,
+      scriptDAO,
+      faviconDAO
+    );
     const torsionfieldDev = new TorsionfieldDevService(this.api.group("torsionfieldDev"), script, scriptDAO, {
       token: TorsionfieldDevToken,
+      reconnectRuntime: () => system.connectTorsionfield(),
     });
     torsionfieldDev.init();
     const runtime = new RuntimeService(
@@ -118,14 +127,6 @@ export default class ServiceWorkerManager {
     subscribe.init();
     const log = new LogService(this.api.group("log"), systemConfig);
     log.init();
-    const system = new SystemService(
-      systemConfig,
-      this.api.group("system"),
-      this.offscreenSend,
-      this.mq,
-      scriptDAO,
-      faviconDAO
-    );
     system.init();
     const agent = new AgentService(this.api.group("agent"), this.offscreenSend, resource);
     agent.init();

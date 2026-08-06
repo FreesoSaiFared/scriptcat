@@ -85,7 +85,7 @@ describe("Torsionfield trusted development service", () => {
     }));
   });
 
-  const createService = (reloadRuntime?: () => Promise<void>) =>
+  const createService = (reloadRuntime?: () => Promise<void>, reconnectRuntime?: () => Promise<void>) =>
     new TorsionfieldDevService(
       { on: vi.fn() } as never,
       { installByCode, enableScript, deleteScript } as never,
@@ -94,6 +94,7 @@ describe("Torsionfield trusted development service", () => {
         token,
         verifyExecution,
         reloadRuntime,
+        reconnectRuntime,
       }
     );
 
@@ -248,10 +249,16 @@ describe("Torsionfield trusted development service", () => {
     });
   });
 
-  it("persists a reload receipt before restarting the offscreen runtime", async () => {
+  it("persists a reload receipt before restarting and reconnecting the offscreen runtime", async () => {
     vi.useFakeTimers();
-    const reloadRuntime = vi.fn(async () => undefined);
-    const service = createService(reloadRuntime);
+    const order: string[] = [];
+    const reloadRuntime = vi.fn(async () => {
+      order.push("reloaded");
+    });
+    const reconnectRuntime = vi.fn(async () => {
+      order.push("reconnected");
+    });
+    const service = createService(reloadRuntime, reconnectRuntime);
 
     const result = await service.execute({
       protocolVersion: "torsionfield-script-v1",
@@ -264,8 +271,11 @@ describe("Torsionfield trusted development service", () => {
     expect(await consumeTorsionfieldDevReload()).toBe(true);
     expect(await consumeTorsionfieldDevReload()).toBe(false);
     expect(reloadRuntime).not.toHaveBeenCalled();
+    expect(reconnectRuntime).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(250);
     expect(reloadRuntime).toHaveBeenCalledOnce();
+    expect(reconnectRuntime).toHaveBeenCalledOnce();
+    expect(order).toEqual(["reloaded", "reconnected"]);
     vi.useRealTimers();
   });
 
