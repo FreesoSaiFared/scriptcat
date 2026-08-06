@@ -11,8 +11,6 @@ const RELOAD_KEY = "torsionfield_dev_reload_v1";
 const FIXTURE_URL_KEY = "torsionfield_dev_fixture_url_v1";
 const MAX_RECEIPTS = 100;
 const RELOAD_TTL_MS = 60_000;
-const RELOAD_WAKE_ALARM = "torsionfield_dev_reload_wake_v1";
-const RELOAD_WAKE_DELAY_MS = 1_500;
 const VERIFY_TIMEOUT_MS = 15_000;
 const VERIFY_INTERVAL_MS = 200;
 const VERIFY_RELOAD_INTERVAL_MS = 2_000;
@@ -134,23 +132,31 @@ interface FixtureObservation {
 interface TorsionfieldDevServiceOptions {
   token: string;
   verifyExecution?: (request: TorsionfieldExecutionVerificationRequest) => Promise<TorsionfieldExecutionVerification>;
-  reloadExtension?: () => void;
-  scheduleReloadWake?: () => Promise<void>;
+  reloadRuntime?: () => Promise<void>;
 }
 
 const noVerification = (): TorsionfieldExecutionVerification => ({ status: "not_run" });
 
-const scheduleTorsionfieldReloadWake = (): Promise<void> =>
-  new Promise((resolveSchedule, rejectSchedule) => {
-    chrome.alarms.create(RELOAD_WAKE_ALARM, { when: Date.now() + RELOAD_WAKE_DELAY_MS }, () => {
-      const lastError = chrome.runtime.lastError;
-      if (lastError) {
-        rejectSchedule(new Error(`failed to schedule Torsionfield reload wake: ${lastError.message}`));
-        return;
-      }
-      resolveSchedule();
-    });
+const restartTorsionfieldOffscreenRuntime = async (): Promise<void> => {
+  if (
+    typeof chrome.offscreen?.hasDocument !== "function" ||
+    typeof chrome.offscreen?.closeDocument !== "function" ||
+    typeof chrome.offscreen?.createDocument !== "function"
+  ) {
+    throw new Error("offscreen runtime restart is unavailable in this browser");
+  }
+  if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument();
+  await chrome.offscreen.createDocument({
+    url: "src/offscreen.html",
+    reasons: [
+      chrome.offscreen.Reason.BLOBS,
+      chrome.offscreen.Reason.CLIPBOARD,
+      chrome.offscreen.Reason.DOM_SCRAPING,
+      chrome.offscreen.Reason.LOCAL_STORAGE,
+    ],
+    justification: "restart the trusted Torsionfield transport runtime",
   });
+};
 
 const preciseError = (error: unknown): string => {
   if (error instanceof Error) return error.message;
@@ -899,21 +905,20 @@ export class TorsionfieldDevService {
     await chrome.storage.local.set({
       [RELOAD_KEY]: { operationId: request.operationId, expiresAt: Date.now() + RELOAD_TTL_MS } satisfies ReloadMarker,
     });
-    const scheduleReloadWake = this.options.scheduleReloadWake ?? scheduleTorsionfieldReloadWake;
-    try {
-      await scheduleReloadWake();
-    } catch (error) {
-      const failed = {
-        ...result,
-        finalStatus: "failed" as const,
-        error: preciseError(error),
-      };
-      await chrome.storage.local.remove(RELOAD_KEY);
-      await writeReceipt(failed);
-      return failed;
-    }
-    const reloadExtension = this.options.reloadExtension ?? (() => chrome.runtime.reload());
-    setTimeout(reloadExtension, 250);
+    const reloadRuntime = this.options.reloadRuntime ?? restartTorsionfieldOffscreenRuntime;
+    setTimeout(() => {
+      void reloadRuntime()
+        .then(() => chrome.storage.local.remove(RELOAD_KEY))
+        .catch(async (error) => {
+          const failed = {
+            ...result,
+            finalStatus: "failed" as const,
+            error: preciseError(error),
+          };
+          await chrome.storage.local.remove(RELOAD_KEY);
+          await writeReceipt(failed);
+        });
+    }, 250);
     return result;
   }
 

@@ -30,12 +30,18 @@ export class SystemService {
     });
 
     if (torsionfieldEnabled) {
-      this.mq.subscribe("offscreenDocumentReady", () => {
-        void vscodeConnect.connect({
-          url: TorsionfieldDevUrl,
-          reconnect: true,
-          torsionfield: { token: TorsionfieldDevToken },
-        });
+      const connectTorsionfield = () => {
+        void vscodeConnect
+          .connect({
+            url: TorsionfieldDevUrl,
+            reconnect: true,
+            torsionfield: { token: TorsionfieldDevToken },
+          })
+          .catch(() => {});
+      };
+      this.mq.subscribe("offscreenDocumentReady", connectTorsionfield);
+      this.mq.subscribe<{ verified: boolean }>("preparationOffscreen", (data) => {
+        if (data.verified) connectTorsionfield();
       });
     }
 

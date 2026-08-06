@@ -85,7 +85,7 @@ describe("Torsionfield trusted development service", () => {
     }));
   });
 
-  const createService = (reloadExtension?: () => void, scheduleReloadWake?: () => Promise<void>) =>
+  const createService = (reloadRuntime?: () => Promise<void>) =>
     new TorsionfieldDevService(
       { on: vi.fn() } as never,
       { installByCode, enableScript, deleteScript } as never,
@@ -93,8 +93,7 @@ describe("Torsionfield trusted development service", () => {
       {
         token,
         verifyExecution,
-        reloadExtension,
-        scheduleReloadWake,
+        reloadRuntime,
       }
     );
 
@@ -249,16 +248,10 @@ describe("Torsionfield trusted development service", () => {
     });
   });
 
-  it("persists a reload receipt and schedules a wake before asking Chrome to reload the extension", async () => {
+  it("persists a reload receipt before restarting the offscreen runtime", async () => {
     vi.useFakeTimers();
-    const callOrder: string[] = [];
-    const scheduleReloadWake = vi.fn(async () => {
-      callOrder.push("wake-scheduled");
-    });
-    const reloadExtension = vi.fn(() => {
-      callOrder.push("reloaded");
-    });
-    const service = createService(reloadExtension, scheduleReloadWake);
+    const reloadRuntime = vi.fn(async () => undefined);
+    const service = createService(reloadRuntime);
 
     const result = await service.execute({
       protocolVersion: "torsionfield-script-v1",
@@ -270,12 +263,9 @@ describe("Torsionfield trusted development service", () => {
     expect(result.finalStatus).toBe("succeeded");
     expect(await consumeTorsionfieldDevReload()).toBe(true);
     expect(await consumeTorsionfieldDevReload()).toBe(false);
-    expect(scheduleReloadWake).toHaveBeenCalledOnce();
-    expect(callOrder).toEqual(["wake-scheduled"]);
-    expect(reloadExtension).not.toHaveBeenCalled();
+    expect(reloadRuntime).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(250);
-    expect(reloadExtension).toHaveBeenCalledOnce();
-    expect(callOrder).toEqual(["wake-scheduled", "reloaded"]);
+    expect(reloadRuntime).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
 

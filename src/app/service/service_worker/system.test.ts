@@ -68,4 +68,34 @@ describe("SystemService Torsionfield connection ownership", () => {
     expect(systemConfig.getVscodeReconnect).not.toHaveBeenCalled();
     expect(systemConfig.getVscodeUrl).not.toHaveBeenCalled();
   });
+
+  it("connects after the offscreen runtime reports verified preparation", async () => {
+    const subscriptions = new Map<string, (data?: { verified?: boolean }) => void>();
+    const mq = {
+      subscribe: vi.fn((event: string, listener: (data?: { verified?: boolean }) => void) => {
+        subscriptions.set(event, listener);
+      }),
+    };
+    const service = new SystemService(
+      { getVscodeReconnect: vi.fn(), getVscodeUrl: vi.fn() } as never,
+      { on: vi.fn() } as never,
+      {} as never,
+      mq as never,
+      {} as never,
+      {} as never
+    );
+
+    service.init();
+    subscriptions.get("preparationOffscreen")?.({ verified: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.connect).toHaveBeenCalledOnce();
+    expect(mocks.connect).toHaveBeenCalledWith({
+      url: "ws://127.0.0.1:8642",
+      reconnect: true,
+      torsionfield: { token: "torsionfield-channel-token" },
+    });
+  });
+
 });
