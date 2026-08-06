@@ -1,0 +1,38 @@
+name: Stage img2threejs through gh-proxy
+
+on:
+  push:
+    branches:
+      - staging/img2threejs-ghproxy-d6673386
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download pinned source through gh-proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://gh-proxy.com/https://github.com/img2threejs/img2threejs/archive/d6673386f89673a58736f8d398dd16ece67874f5.zip'
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 20 \
+            "$url" -o img2threejs-d6673386.zip
+          unzip -tq img2threejs-d6673386.zip
+          sha256sum img2threejs-d6673386.zip | tee SOURCE_SHA256.txt
+          printf '%s\n' 'repository=img2threejs/img2threejs' \
+            'commit=d6673386f89673a58736f8d398dd16ece67874f5' \
+            "source_url=$url" > SOURCE_PROVENANCE.txt
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: img2threejs-source-d6673386
+          path: |
+            img2threejs-d6673386.zip
+            SOURCE_SHA256.txt
+            SOURCE_PROVENANCE.txt
+          if-no-files-found: error
+          retention-days: 7
