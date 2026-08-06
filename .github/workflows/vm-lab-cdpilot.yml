@@ -60,7 +60,7 @@ jobs:
           test -s /tmp/cdp-version.json
           export CDP_PORT=9222
           export CDPILOT_PROFILE=/tmp/cdpilot-profile
-          python3 upstream/src/cdpilot.py status | tee /tmp/cdpilot-status.txt
+          python3 upstream/src/cdpilot.py health | tee /tmp/cdpilot-health.txt
           python3 upstream/src/cdpilot.py go 'data:text/html,<title>VM%20LAB</title><main id="proof">CDPILOT_VM_OK</main>'
           python3 upstream/src/cdpilot.py eval 'document.querySelector("#proof").textContent' | tee /tmp/cdpilot-eval.txt
           grep -q 'CDPILOT_VM_OK' /tmp/cdpilot-eval.txt
@@ -77,7 +77,7 @@ jobs:
           cp upstream/LICENSE handoff/cdpilot/
           cp upstream/README.md handoff/cdpilot/
           cp /tmp/cdpilot-version.txt handoff/
-          cp /tmp/cdpilot-status.txt handoff/
+          cp /tmp/cdpilot-health.txt handoff/
           cp /tmp/cdpilot-eval.txt handoff/
           cp /tmp/cdp-version.json handoff/
           cp /tmp/cdpilot-shot.png handoff/
