@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const core = require('./transductive-prompt-runtime.chatgpt-lab-core.js');
 
 const selfTest = core.runCoreSelfTest();
@@ -49,9 +51,18 @@ const oversizedLibrary = Array.from({ length: 260 }, (_, index) => ({
 }));
 assert.equal(core.normalizePromptLibrary(oversizedLibrary).length, 200);
 
+const installedMetadata = fs.readFileSync(
+  path.join(__dirname, 'transductive-prompt-runtime.chatgpt-lab.user.js'),
+  'utf8',
+);
+assert.match(installedMetadata, /@version\s+0\.3\.2-live-surface/);
+assert.match(installedMetadata, /@require\s+https:\/\/raw\.githubusercontent\.com\/FreesoSaiFared\/scriptcat\/a9942fd4b3ba8b02ea396208f021d257f5e8b9ef\/userscripts\/torsionfield-chatgpt-conversation-surface\.js/);
+assert.match(installedMetadata, /@require\s+https:\/\/raw\.githubusercontent\.com\/FreesoSaiFared\/scriptcat\/a9942fd4b3ba8b02ea396208f021d257f5e8b9ef\/userscripts\/transductive-prompt-runtime\.chatgpt-lab-core\.js/);
+assert.doesNotMatch(installedMetadata, /refs\/heads\/chatgpt\/torsionfield-chatgpt-surface-20260806/);
+
 console.log(JSON.stringify({
   ok: true,
   version: core.VERSION,
-  assertions: 16,
+  assertions: 20,
   contractFingerprint: first.fingerprint,
 }));

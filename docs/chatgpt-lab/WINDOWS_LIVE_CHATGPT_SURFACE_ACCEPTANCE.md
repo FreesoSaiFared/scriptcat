@@ -14,3 +14,10 @@ The first live prompt created exactly one user turn and one settled assistant tu
 The repair accepts only the expected same-origin non-durable-to-durable first-conversation transition. Durable conversation-to-different-durable-conversation changes remain `UNKNOWN_OUTCOME`. Prompt correlation now removes the collapsible UI control and collapses presentation whitespace while retaining all words, punctuation, contract fingerprints and nonces. Focused tests cover both regressions.
 
 The next distinguishing action is a second live run using `scripts/live-chatgpt-surface-acceptance.cjs`. Acceptance requires the persisted receipt to become `CONFIRMED`; all earlier postconditions must remain true.
+
+
+## ScriptCat requirement-cache repair
+
+The second live run still produced the old `conversation-identity-changed` receipt after the source fix had been pushed and the userscript had been updated. The real effect and page evidence were otherwise correct. ScriptCat had retained the previously fetched `@require` resource because its URL still named the moving branch. Updating the top-level userscript version alone did not invalidate that resource URL.
+
+The userscript now pins both `@require` resources to commit `a9942fd4b3ba8b02ea396208f021d257f5e8b9ef`. This makes the executable dependency set immutable and gives every later change a new URL plus a deliberate userscript version. A static test rejects a return to the moving branch URL.
