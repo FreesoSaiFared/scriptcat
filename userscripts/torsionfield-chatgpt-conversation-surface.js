@@ -29,7 +29,7 @@
 (function installTorsionfieldChatGPTConversationSurface(globalObject) {
   'use strict';
 
-  const VERSION = '0.1.0-isolated';
+  const VERSION = '0.1.1-live';
   const RECEIPT_STORAGE_KEY = 'torsionfield.chatgpt.surface.receipts.v1';
   const MAX_RECEIPTS = 64;
 
@@ -71,6 +71,20 @@
 
   function normalizeText(value) {
     return String(value == null ? '' : value).replace(/\r\n?/g, '\n').trim();
+  }
+
+  /*
+   * CORRELATION NORMALIZATION IS DELIBERATELY NARROW
+   * ------------------------------------------------
+   * ChatGPT preserves the submitted bytes internally, yet its rendered user
+   * bubble may turn line breaks into spaces. Correlation therefore treats runs
+   * of presentation whitespace as equivalent while keeping every visible word,
+   * punctuation mark, contract fingerprint and nonce significant. This avoids
+   * accepting a merely similar prompt and fixes the real live-page mismatch
+   * observed on 2026-08-06.
+   */
+  function normalizeCorrelationText(value) {
+    return normalizeText(value).replace(/\s+/g, ' ').trim();
   }
 
   function elementText(node) {
@@ -138,13 +152,23 @@
   }
 
   function pureOutcomeClassification(before, after, expectedUserText = '') {
-    const expected = normalizeText(expectedUserText);
+    const expected = normalizeCorrelationText(expectedUserText);
     const newUserTurn = after.userTurnCount > before.userTurnCount;
     const newAssistantTurn = after.assistantTurnCount > before.assistantTurnCount
       || (after.latestAssistantHash && after.latestAssistantHash !== before.latestAssistantHash);
-    const promptObserved = !expected || after.userTurnTexts.some((text) => normalizeText(text) === expected);
+    const promptObserved = !expected || after.userTurnTexts.some((text) => normalizeCorrelationText(text) === expected);
 
-    if (after.identity.key !== before.identity.key) {
+    /*
+     * A first send starts at a provider landing route and is then assigned a
+     * durable /c/<id> route. That one transition is the expected completion of
+     * conversation creation, not evidence that another actor stole the tab.
+     * Once either side already has a durable ID, every different ID remains an
+     * ambiguous cross-conversation mutation and is rejected.
+     */
+    const expectedNewConversationTransition = !before.identity.isDurableConversation
+      && after.identity.isDurableConversation
+      && before.identity.origin === after.identity.origin;
+    if (after.identity.key !== before.identity.key && !expectedNewConversationTransition) {
       return { status: 'UNKNOWN_OUTCOME', reason: 'conversation-identity-changed' };
     }
     if (after.streaming && (newUserTurn || promptObserved || newAssistantTurn)) {
@@ -253,8 +277,18 @@
 
     function turnText(node) {
       if (!node) return '';
-      const clone = typeof node.cloneNode === 'function' ? node.cloneNode(true) : node;
-      clone.querySelectorAll?.('.tspr-lab-badge,.tspr-lab-blocker').forEach((element) => element.remove?.());
+
+      /*
+       * Long ChatGPT user messages are wrapped by a collapsible control whose
+       * visible label becomes part of outer innerText ("Show more"). Reading the
+       * dedicated content node first retains the submitted message and excludes
+       * that provider UI label. Assistant turns use the whole turn because they
+       * currently have no equivalent stable content wrapper.
+       */
+      const content = node.querySelector?.('[data-testid="collapsible-user-message-content"]') || node;
+      const clone = typeof content.cloneNode === 'function' ? content.cloneNode(true) : content;
+      clone.querySelectorAll?.('.tspr-lab-badge,.tspr-lab-blocker,[data-testid="collapsible-user-message-toggle"]')
+        .forEach((element) => element.remove?.());
       return normalizeText(clone.innerText || clone.textContent || '');
     }
 
@@ -420,6 +454,7 @@
     MAX_RECEIPTS,
     fnv1a64,
     normalizeText,
+    normalizeCorrelationText,
     parseConversationIdentity,
     pureOutcomeClassification,
     create,

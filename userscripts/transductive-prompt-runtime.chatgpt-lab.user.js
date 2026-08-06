@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Transductive Prompt Runtime — ChatGPT Lab
 // @namespace    https://transductive.science/
-// @version      0.3.0-isolated-surface
+// @version      0.3.1-live-surface
 // @description  Transactional prompt contracts and finalized-response gates for ChatGPT.
 // @author       Friso + ChatGPT Lab
 // @match        https://chatgpt.com/*
