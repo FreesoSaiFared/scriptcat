@@ -4,6 +4,12 @@ on:
   push:
     paths:
       - .github/workflows/torsionfield-chatgpt-surface-ghproxy-stage.yml
+      - userscripts/torsionfield-chatgpt-conversation-surface.js
+      - userscripts/torsionfield-chatgpt-conversation-surface.test.cjs
+      - userscripts/transductive-prompt-runtime.chatgpt-lab-core.js
+      - userscripts/transductive-prompt-runtime.chatgpt-lab.user.js
+      - userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs
+      - docs/chatgpt-lab/CHATGPT_CONVERSATION_SURFACE_RALPH_LOOP.md
   workflow_dispatch:
 
 permissions:
@@ -45,8 +51,32 @@ jobs:
           # POSTCONDITION: the archive must contain the workflow file that caused
           # this run. That proves we fetched this commit rather than an older
           # default-branch archive or an HTML error page with a successful status.
-          test "$(find extracted -type f -path '*/.github/workflows/torsionfield-chatgpt-surface-ghproxy-stage.yml' | wc -l)" -eq 1
+          root="$(find extracted -mindepth 1 -maxdepth 1 -type d | head -1)"
+          test -n "${root}"
+          test -f "${root}/.github/workflows/torsionfield-chatgpt-surface-ghproxy-stage.yml"
           find extracted -type f -printf '%P\n' | sort > staged-evidence/EXTRACTED_FILES.txt
+
+      - name: Verify the isolated semantic surface and existing prompt-runtime candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$(find extracted -mindepth 1 -maxdepth 1 -type d | head -1)"
+          cd "${root}"
+
+          # These tests distinguish actual behavior from comments and branch names.
+          # They intentionally avoid the full package install so the immutable source
+          # staging lane remains usable even when a downstream VM has no npm network.
+          node --check userscripts/torsionfield-chatgpt-conversation-surface.js
+          node --check userscripts/torsionfield-chatgpt-conversation-surface.test.cjs
+          node userscripts/torsionfield-chatgpt-conversation-surface.test.cjs \
+            | tee "${GITHUB_WORKSPACE}/staged-evidence/surface-test.log"
+          node --check userscripts/transductive-prompt-runtime.chatgpt-lab-core.js
+          node --check userscripts/transductive-prompt-runtime.chatgpt-lab.user.js
+          node --check userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs
+          node userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs \
+            | tee "${GITHUB_WORKSPACE}/staged-evidence/existing-lab-test.log"
+          node userscripts/transductive-prompt-runtime.chatgpt-lab-core.js \
+            | tee "${GITHUB_WORKSPACE}/staged-evidence/core-self-test.log"
 
       - name: Upload exact source and acquisition evidence
         uses: actions/upload-artifact@v4
