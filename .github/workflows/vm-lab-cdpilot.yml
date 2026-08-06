@@ -1,0 +1,107 @@
+name: VM Lab - cdpilot staging
+
+on:
+  push:
+    branches:
+      - chatgpt/vm-lab-cdpilot
+    paths:
+      - .github/workflows/vm-lab-cdpilot.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout staging repository
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned cdpilot source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/mehmetnadir/cdpilot.git upstream
+          git -C upstream checkout --detach 584bb0da61c93e65df6a7405ddae8283fb6b3116
+          test "$(git -C upstream rev-parse HEAD)" = "584bb0da61c93e65df6a7405ddae8283fb6b3116"
+
+      - name: Source-only validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile upstream/src/cdpilot.py
+          node --check upstream/bin/cdpilot.js
+          python3 upstream/src/cdpilot.py help > /tmp/cdpilot-help.txt
+          grep -q "cdpilot" /tmp/cdpilot-help.txt
+
+      - name: Real Chrome CDP smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$CHROME"
+          rm -rf /tmp/cdpilot-profile /tmp/cdpilot-shot.png
+          "$CHROME" \
+            --headless=new \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --remote-debugging-address=127.0.0.1 \
+            --remote-debugging-port=9222 \
+            --user-data-dir=/tmp/cdpilot-profile \
+            about:blank >/tmp/chrome.log 2>&1 &
+          CHROME_PID=$!
+          trap 'kill "$CHROME_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 50); do
+            curl -fsS http://127.0.0.1:9222/json/version >/tmp/cdp-version.json && break
+            sleep 0.2
+          done
+          test -s /tmp/cdp-version.json
+          export CDP_PORT=9222
+          export CDPILOT_PROFILE=/tmp/cdpilot-profile
+          python3 upstream/src/cdpilot.py status | tee /tmp/cdpilot-status.txt
+          python3 upstream/src/cdpilot.py go 'data:text/html,<title>VM%20LAB</title><main id="proof">CDPILOT_VM_OK</main>'
+          python3 upstream/src/cdpilot.py eval 'document.querySelector("#proof").textContent' | tee /tmp/cdpilot-eval.txt
+          grep -q 'CDPILOT_VM_OK' /tmp/cdpilot-eval.txt
+          python3 upstream/src/cdpilot.py shot /tmp/cdpilot-shot.png
+          test -s /tmp/cdpilot-shot.png
+
+      - name: Build self-contained VM handoff source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p handoff/cdpilot
+          cp upstream/src/cdpilot.py handoff/cdpilot/
+          cp upstream/bin/cdpilot.js handoff/cdpilot/
+          cp upstream/LICENSE handoff/cdpilot/
+          cp upstream/README.md handoff/cdpilot/
+          cp /tmp/cdpilot-help.txt handoff/
+          cp /tmp/cdpilot-status.txt handoff/
+          cp /tmp/cdpilot-eval.txt handoff/
+          cp /tmp/cdp-version.json handoff/
+          cp /tmp/cdpilot-shot.png handoff/
+          cat > handoff/PINNED_SOURCE.txt <<'EOF'
+          repository=https://github.com/mehmetnadir/cdpilot
+          commit=584bb0da61c93e65df6a7405ddae8283fb6b3116
+          license=MIT
+          EOF
+          cat > handoff/RUN_IN_INTERNAL_VM.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          python3 -m py_compile "$ROOT/cdpilot/cdpilot.py"
+          node --check "$ROOT/cdpilot/cdpilot.js"
+          python3 "$ROOT/cdpilot/cdpilot.py" help >/dev/null
+          echo SOURCE_VALIDATION_OK
+          EOF
+          chmod +x handoff/RUN_IN_INTERNAL_VM.sh
+          (cd handoff && sha256sum $(find . -type f -printf '%P\n' | sort) > SHA256SUMS)
+
+      - name: Upload VM handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdpilot-vm-handoff-584bb0d
+          path: handoff/
+          if-no-files-found: error
+          retention-days: 7
