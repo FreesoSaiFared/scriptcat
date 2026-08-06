@@ -1,0 +1,42 @@
+name: Internal VM pinned candidate source stage
+
+on:
+  push:
+    branches:
+      - chatgpt/internal-vm-source-stage-20260806
+    paths:
+      - .github/workflows/internal-vm-source-stage.yml
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: 3a6c7132e3a4436d8cd631d570e6f635418b6aad
+          fetch-depth: 1
+
+      - name: Verify and package pinned source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "3a6c7132e3a4436d8cd631d570e6f635418b6aad"
+          mkdir -p staged
+          git archive --format=zip --prefix=scriptcat-3a6c7132/ HEAD > staged/scriptcat-3a6c7132-source.zip
+          tar -czf staged/scriptcat-3a6c7132-gitdir.tgz .git
+          git rev-parse HEAD > staged/PINNED_COMMIT.txt
+          sha256sum staged/scriptcat-3a6c7132-source.zip staged/scriptcat-3a6c7132-gitdir.tgz > staged/SHA256SUMS
+
+      - name: Upload pinned candidate source
+        uses: actions/upload-artifact@v4
+        with:
+          name: scriptcat-candidate-pinned-source
+          path: staged/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
