@@ -55,6 +55,18 @@ async function main() {
     await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3_000);
 
+    /*
+     * On a fresh browser start ScriptCat's service worker can finish registering
+     * the persisted user script after ChatGPT's first document has already passed
+     * document-idle. Reload exactly once when the launcher is absent so the newly
+     * registered script receives a document lifecycle. A duplicate launcher still
+     * fails below; this is not a polling loop or a blind retry of submission.
+     */
+    if (await page.locator('#tspr-lab-launcher').count() === 0) {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('#tspr-lab-launcher').waitFor({ state: 'visible', timeout: 20_000 });
+    }
+
     const composer = page.locator(
       '#prompt-textarea,textarea[data-id="root"],form [contenteditable="true"][role="textbox"]',
     ).last();

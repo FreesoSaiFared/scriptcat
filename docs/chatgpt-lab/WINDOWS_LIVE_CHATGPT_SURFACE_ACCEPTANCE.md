@@ -1,23 +1,40 @@
 # Windows live ChatGPT acceptance — isolated ConversationSurface
 
-Status: first live run exposed two correlation defects; repaired candidate prepared for rerun.
+Status: **PROVEN against the dedicated authenticated ChatGPT profile on 2026-08-06.**
 
-The production ScriptCat build from `chatgpt/torsionfield-chatgpt-surface-20260806` was loaded in Playwright Chromium 149 against the existing dedicated authenticated profile `E:\Transductive_MCP_Work\page-agent-chatgpt-profile`. Chrome Stable 151 and Chrome Canary 153 did not honor command-line unpacked-extension loading in this run; the installed Playwright Chromium did. The normal interactive Chrome and Canary profiles were left running and untouched.
+Repository branch: `chatgpt/torsionfield-chatgpt-surface-20260806`  
+Runtime repair commit: `4a43c0dc32a32dc97031d6de3a1413c06071fe00`  
+Browser: Playwright Chromium `149.0.7827.55` on Windows  
+Extension: unpacked ScriptCat Beta `1.5.0.1100`, ID `jikpfcegceaoondgnomhpopjgoaljndo`
 
-ScriptCat Beta `1.5.0.1100` loaded as an unpacked MV3 extension. `chrome.developerPrivate.updateExtensionConfiguration` enabled `userScriptsAccess`, and the candidate userscript was installed through ScriptCat's real installation page from the immutable commit URL.
+## Direct live result
 
-The first live prompt created exactly one user turn and one settled assistant turn. The contract appeared exactly once, the assistant returned the nonce exactly, the gate badge reported `Gates pass`, and the composer was empty afterward. The receipt nevertheless reported `UNKNOWN_OUTCOME` for two live-only reasons:
+The final acceptance harness ran immediately after a fresh dedicated-browser start, without a manual page reload. A real ChatGPT submission started on the non-durable landing route and created one durable conversation. The page showed exactly one new user turn, exactly one settled assistant turn, exactly one constraint contract, the expected nonce in the assistant answer, an empty composer after submission, and the persisted receipt:
 
-1. a first submission legitimately changes the route from the non-durable landing page to a durable `/c/<conversation-id>` route;
-2. ChatGPT renders long user messages inside a collapsible wrapper and flattens line breaks, so outer `innerText` includes `Show more` and differs from the exact composer string.
+```text
+CONFIRMED
+contract-injected:prompt-and-settled-assistant-effect-observed
+```
 
-The repair accepts only the expected same-origin non-durable-to-durable first-conversation transition. Durable conversation-to-different-durable-conversation changes remain `UNKNOWN_OUTCOME`. Prompt correlation now removes the collapsible UI control and collapses presentation whitespace while retaining all words, punctuation, contract fingerprints and nonces. Focused tests cover both regressions.
+The separate live draft probe placed a known non-empty draft in the composer, reached `HUMAN_DRAFT_PRESENT`, preserved the exact SHA-256 before and after the refused operation, submitted no turn, and cleared only the probe-owned draft after verification.
 
-The next distinguishing action is a second live run using `scripts/live-chatgpt-surface-acceptance.cjs`. Acceptance requires the persisted receipt to become `CONFIRMED`; all earlier postconditions must remain true.
+Machine-readable evidence recorded at `2026-08-06T17:03:12.826Z` is committed at `docs/chatgpt-lab/evidence/WINDOWS_LIVE_CHATGPT_SURFACE_20260806.json`. The local full screenshot is retained outside Git because it contains the authenticated profile's sidebar and unrelated conversation titles.
 
+## Failures that produced the repairs
 
-## ScriptCat requirement-cache repair
+The first live effect was correct, yet the receipt reported `UNKNOWN_OUTCOME`. Two live-only observations caused it:
 
-The second live run still produced the old `conversation-identity-changed` receipt after the source fix had been pushed and the userscript had been updated. The real effect and page evidence were otherwise correct. ScriptCat had retained the previously fetched `@require` resource because its URL still named the moving branch. Updating the top-level userscript version alone did not invalidate that resource URL.
+1. the first submission legitimately changes the route from `/` to a durable `/c/<conversation-id>` route;
+2. ChatGPT wraps long user messages in a collapsible element, adds a `Show more` control to outer text, and flattens presentation line breaks.
 
-The userscript now pins both `@require` resources to commit `a9942fd4b3ba8b02ea396208f021d257f5e8b9ef`. This makes the executable dependency set immutable and gives every later change a new URL plus a deliberate userscript version. A static test rejects a return to the moving branch URL.
+The surface now permits only a same-origin non-durable-to-durable creation transition. Durable conversation changes remain ambiguous. Correlation reads the dedicated user-message content element and collapses presentation whitespace while retaining every visible word, punctuation mark, contract fingerprint and nonce.
+
+The next live run still executed the old classifier because ScriptCat had cached the moving-branch `@require` URL. Userscript version `0.3.2-live-surface` pins both requirements to `4a43c0dc32a32dc97031d6de3a1413c06071fe00`. Static tests reject a return to `refs/heads/...` requirement URLs.
+
+A fresh browser start also showed one bounded startup race: ChatGPT's initial document could reach `document-idle` before ScriptCat restored its registered user script. The acceptance harness now reloads exactly once only when the launcher is absent; it never retries a submission.
+
+## Preservation and scope
+
+The run used the existing dedicated authenticated profile directly. It copied no cookies, profile databases, or authentication material and called no private ChatGPT endpoint. Normal Stable and Canary browser profiles were untouched. Verbose Chromium logs containing account identifiers are excluded from repository evidence.
+
+The candidate is ready for semantic porting into the current authoritative Torsionfield branch. Wholesale branch merge remains unnecessary; the bounded surface, focused tests, pinned metadata, and live acceptance harness are the transplantable units.
