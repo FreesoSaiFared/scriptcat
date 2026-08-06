@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Transductive Prompt Runtime — ChatGPT Lab
 // @namespace    https://transductive.science/
-// @version      0.2.0-lab
+// @version      0.3.0-isolated-surface
 // @description  Transactional prompt contracts and finalized-response gates for ChatGPT.
 // @author       Friso + ChatGPT Lab
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-idle
-// @require      https://raw.githubusercontent.com/FreesoSaiFared/scriptcat/refs/heads/chatgpt/torsionfield-lab/userscripts/transductive-prompt-runtime.chatgpt-lab-core.js
+// @require      https://raw.githubusercontent.com/FreesoSaiFared/scriptcat/refs/heads/chatgpt/torsionfield-chatgpt-surface-20260806/userscripts/torsionfield-chatgpt-conversation-surface.js
+// @require      https://raw.githubusercontent.com/FreesoSaiFared/scriptcat/refs/heads/chatgpt/torsionfield-chatgpt-surface-20260806/userscripts/transductive-prompt-runtime.chatgpt-lab-core.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
@@ -17,8 +18,22 @@
 
 (() => {
   'use strict';
+  const SurfaceModule = globalThis.TorsionfieldChatGPTConversationSurface;
   const Core = globalThis.TransductivePromptLabCore;
+  if (!SurfaceModule) throw new Error('Torsionfield ChatGPT Conversation Surface did not load');
   if (!Core) throw new Error('Transductive Prompt Runtime Lab core did not load');
+
+  /*
+   * WHY THIS IS CREATED ONCE
+   * ------------------------
+   * The surface owns observations of conversation identity, baseline turn
+   * counts, streaming state and settled output. The prompt runtime still owns
+   * its existing contract mutation. Keeping those responsibilities separate
+   * lets the integration process later replace the ChatGPT bindings without
+   * rewriting prompt-library or gate behavior.
+   */
+  const conversationSurface = SurfaceModule.create();
+  globalThis.__TORSIONFIELD_CHATGPT_CONVERSATION_SURFACE__ = conversationSurface;
   const { VERSION, PERSISTENT_KEY, EPOCH_KEY, OPEN, STRUCTURAL, FINALIZE_DELAY_MS, BUILTIN_PROMPTS, GATES, fnv1a64, stripConstraintContracts, normalizePromptLibrary, normalizePersistentState, normalizeEpochState, defaultEpochState, validateResponse, buildConstraintContract, detectPromptCandidates, runCoreSelfTest } = Core;
   function readPersistent() {
     let value = null;
@@ -60,18 +75,96 @@
   }
 
   function ensureContract() {
-    const node = findComposer(); if (!node) return { ok: false, changed: false };
+    const node = findComposer();
+    if (!node) return { ok: false, changed: false, beforeText: '', afterText: '', reason: 'composer-missing' };
     const current = composerText(node), contract = buildConstraintContract(epoch);
-    if (current.includes(OPEN) && current.includes(`fingerprint="${contract.fingerprint}"`)) return { ok: true, changed: false };
+    if (current.includes(OPEN) && current.includes(`fingerprint="${contract.fingerprint}"`)) {
+      return { ok: true, changed: false, beforeText: current, afterText: current, reason: 'contract-already-present' };
+    }
     const clean = stripConstraintContracts(current), next = `${clean}${clean ? '\n\n' : ''}${contract.text}`;
-    return { ok: setComposerText(node, next), changed: true };
+    const ok = setComposerText(node, next);
+    return { ok, changed: true, beforeText: current, afterText: next, reason: ok ? 'contract-injected' : 'contract-injection-not-observed' };
   }
 
   function sendButton(form = findComposer()?.closest('form')) { for (const selector of ['button[data-testid="send-button"]', 'button[aria-label="Send prompt"]', 'button[aria-label="Send message"]', 'button[aria-label^="Send"]']) { const found = (form || document).querySelector(selector); if (found && visible(found) && !found.disabled) return found; } return null; }
   function intent(event) { const composer = findComposer(), form = composer?.closest('form'); if (!composer) return null; if (event.type === 'keydown') return event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !event.isComposing && composer.contains(event.target) ? { form } : null; if (event.type === 'click') { const target = event.target.closest('button'); return target && target === sendButton(form) ? { form, target } : null; } return event.type === 'submit' && event.target === form ? { form } : null; }
 
   function replay(sendIntent) { bypass = true; const target = sendIntent.target || sendButton(sendIntent.form); if (target) target.click(); else if (sendIntent.form?.requestSubmit) sendIntent.form.requestSubmit(); setTimeout(() => { bypass = false; }, 0); }
-  function guard(event) { if (bypass) return; const sendIntent = intent(event); if (!sendIntent) return; const result = ensureContract(); if (!result.ok && result.changed) { event.preventDefault(); event.stopImmediatePropagation(); return; } if (!result.changed) return; event.preventDefault(); event.stopImmediatePropagation(); requestAnimationFrame(() => requestAnimationFrame(() => replay(sendIntent))); }
+
+  function observeSubmission(baseline, expectedUserText, injectionResult) {
+    /*
+     * This observer deliberately does not initiate a retry. A missing click
+     * acknowledgement, a route change, or a sleeping service worker can all leave
+     * the external effect ambiguous. Only a later NOT_APPLIED receipt authorizes
+     * another caller to try again; UNKNOWN_OUTCOME is a stop-and-inspect state.
+     */
+    void conversationSurface.waitForSettledTurn(baseline, {
+      expectedUserText,
+      timeoutMs: 180_000,
+      pollMs: 300,
+      quietMs: 1_500,
+    }).then((outcome) => {
+      conversationSurface.recordReceipt({
+        id: `prompt-send-${Date.now().toString(36)}`,
+        operation: 'prompt-contract-send',
+        status: outcome.status,
+        reason: `${injectionResult.reason}:${outcome.reason}`,
+        conversationKey: outcome.after.identity.key,
+        baselineHash: baseline.latestAssistantHash,
+        resultHash: outcome.after.latestAssistantHash,
+      });
+    }).catch((error) => {
+      conversationSurface.recordReceipt({
+        id: `prompt-send-observer-error-${Date.now().toString(36)}`,
+        operation: 'prompt-contract-send',
+        status: 'UNKNOWN_OUTCOME',
+        reason: `observer-error:${error?.message || String(error)}`,
+        conversationKey: baseline.identity.key,
+        baselineHash: baseline.latestAssistantHash,
+      });
+    });
+  }
+
+  function guard(event) {
+    if (bypass) return;
+    const sendIntent = intent(event);
+    if (!sendIntent) return;
+
+    // Capture the exact conversation and turn state before changing the composer.
+    // Without this baseline, a prior answer can be mistaken for the response to
+    // the prompt being sent now.
+    const baseline = conversationSurface.captureBaseline();
+    const result = ensureContract();
+
+    if (!result.ok && result.changed) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      conversationSurface.recordReceipt({
+        id: `prompt-send-cancelled-${Date.now().toString(36)}`,
+        operation: 'prompt-contract-send',
+        status: 'NOT_APPLIED',
+        reason: result.reason,
+        conversationKey: baseline.identity.key,
+        baselineHash: baseline.latestAssistantHash,
+      });
+      return;
+    }
+
+    if (!result.changed) {
+      // The ordinary site event continues. Observation begins in a microtask so
+      // ChatGPT first receives the user-initiated event. This path still obtains a
+      // receipt even when the correct contract was already present.
+      queueMicrotask(() => observeSubmission(baseline, result.afterText, result));
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      replay(sendIntent);
+      observeSubmission(baseline, result.afterText, result);
+    }));
+  }
 
   function messageText(message) { const clone = message.cloneNode(true); clone.querySelectorAll('.tspr-lab-badge,.tspr-lab-blocker').forEach((node) => node.remove()); return (clone.innerText || clone.textContent || '').trim(); }
   function messages() { const explicit = [...document.querySelectorAll('[data-message-author-role="assistant"]')]; return explicit.length ? explicit : [...document.querySelectorAll('article')].filter((node) => /assistant/i.test(node.getAttribute('data-testid') || node.getAttribute('aria-label') || '')); }
@@ -118,6 +211,7 @@
     GM_registerMenuCommand('Prompt Runtime Lab: lock patch-only gate', () => activateGate('patch-only'));
     GM_registerMenuCommand('Prompt Runtime Lab: export library', exportLibrary);
     GM_registerMenuCommand('Prompt Runtime Lab: import library', importLibrary);
-    GM_registerMenuCommand('Prompt Runtime Lab: self-test', () => alert(JSON.stringify(runCoreSelfTest(), null, 2)));
+    GM_registerMenuCommand('Prompt Runtime Lab: show conversation receipts', () => alert(JSON.stringify(conversationSurface.readReceipts(), null, 2)));
+    GM_registerMenuCommand('Prompt Runtime Lab: self-test', () => alert(JSON.stringify({ core: runCoreSelfTest(), surface: { version: conversationSurface.version, identity: conversationSurface.identity(), composer: conversationSurface.readComposer() } }, null, 2)));
   }
 })();
