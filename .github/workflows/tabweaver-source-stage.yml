@@ -1,4 +1,4 @@
-name: Internal VM ScriptCat offline dependencies
+name: Internal VM ScriptCat dependency relay
 
 on:
   workflow_dispatch:
@@ -7,35 +7,29 @@ permissions:
   contents: read
 
 jobs:
-  stage:
+  relay:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: 3a6c7132e3a4436d8cd631d570e6f635418b6aad
-          fetch-depth: 1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.16.0
-      - name: Resolve exact locked dependencies
+      - name: Download exact temporary release assets
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
-          test "$(git rev-parse HEAD)" = "3a6c7132e3a4436d8cd631d570e6f635418b6aad"
-          corepack enable
-          corepack prepare pnpm@10.34.1 --activate
-          pnpm install --frozen-lockfile --ignore-scripts
-          mkdir -p staged/pnpm-cli
-          npm install --prefix staged/pnpm-cli --ignore-scripts pnpm@10.34.1
-          tar --zstd -cf staged/scriptcat-node_modules.tar.zst node_modules
-          tar --zstd -cf staged/pnpm-cli.tar.zst -C staged pnpm-cli
-          sha256sum staged/*.tar.zst | tee staged/SHA256SUMS
-          du -sh node_modules staged/*
-      - name: Upload exact offline dependencies
+          mkdir -p staged
+          gh release download internal-vm-scriptcat-deps-3a6c7132-20260806 \
+            --repo FreesoSaiFared/scriptcat \
+            --dir staged \
+            --pattern 'pnpm-10.34.1.tgz' \
+            --pattern 'pnpm-store-content-v10.tar.xz'
+          sha256sum staged/* | tee staged/SHA256SUMS
+          tar -tzf staged/pnpm-10.34.1.tgz | grep -F 'pnpm/10.34.1/bin/pnpm.cjs'
+          xz -t staged/pnpm-store-content-v10.tar.xz
+      - name: Upload immutable dependency relay
         uses: actions/upload-artifact@v4
         with:
-          name: scriptcat-candidate-offline-dependencies
+          name: scriptcat-candidate-debian-dependencies
           path: staged/
           compression-level: 0
           retention-days: 1
