@@ -1,0 +1,37 @@
+name: Stage Three.js r185 through gh-proxy
+
+on:
+  push:
+    branches:
+      - staging/img2threejs-ghproxy-d6673386
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-three:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download pinned Three.js runtime through gh-proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://gh-proxy.com/https://raw.githubusercontent.com/mrdoob/three.js/r185/build/three.module.min.js'
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 20 \
+            "$url" -o three.module.min.js
+          test -s three.module.min.js
+          grep -q 'WebGLRenderer' three.module.min.js
+          sha256sum three.module.min.js | tee THREE_SHA256.txt
+          printf '%s\n' 'repository=mrdoob/three.js' 'tag=r185' "source_url=$url" > THREE_PROVENANCE.txt
+
+      - name: Upload Three.js runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: three-r185-runtime
+          path: |
+            three.module.min.js
+            THREE_SHA256.txt
+            THREE_PROVENANCE.txt
+          if-no-files-found: error
+          retention-days: 7
