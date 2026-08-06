@@ -1,4 +1,4 @@
-name: TabWeaver source and runtime staging
+name: Internal VM current-branch source and runtime staging
 
 on:
   push:
@@ -9,82 +9,64 @@ on:
 permissions:
   contents: read
 
-env:
-  SCRIPTCAT_URL: https://gh-proxy.com/https://github.com/scriptscat/scriptcat/archive/65121faaa5376eaa0d04657c2d1855a402bd153d.zip
-  PLAYCANVAS_URL: https://gh-proxy.com/https://github.com/playcanvas/engine/archive/d88289fb0c17be76ec4159974faf0d07d3582a6b.zip
-  GEOGEBRA_URL: https://gh-proxy.com/https://github.com/geogebra/geogebra/archive/e1d52684831c0ad6b0c8ef37a3f072a55ad8100f.zip
-
 jobs:
   stage:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
         with:
-          node-version: 22
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-      - name: Download pinned repositories through gh-proxy.com
+          fetch-depth: 0
+
+      - name: Record and archive exact source commit
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p source-archives source runtime
-          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$SCRIPTCAT_URL" -o source-archives/scriptcat-source.zip
-          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$PLAYCANVAS_URL" -o source-archives/playcanvas-engine.zip
-          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 "$GEOGEBRA_URL" -o source-archives/geogebra.zip
-          unzip -q source-archives/scriptcat-source.zip -d source
-          unzip -q source-archives/playcanvas-engine.zip -d source
-          unzip -q source-archives/geogebra.zip -d source
-          sha256sum source-archives/*.zip | tee source-archives/SHA256SUMS
-      - name: Build PlayCanvas ESM
+          mkdir -p staged-source staged-runtime staged-evidence
+          git rev-parse HEAD | tee staged-evidence/COMMIT_SHA
+          git status --short | tee staged-evidence/GIT_STATUS.txt
+          git archive --format=tar.gz --prefix="scriptcat-${GITHUB_SHA}/" -o staged-source/scriptcat-${GITHUB_SHA}.tar.gz "${GITHUB_SHA}"
+          sha256sum staged-source/* | tee staged-evidence/SOURCE_SHA256SUMS
+
+      - name: Install and test focused lab candidate
         shell: bash
         run: |
           set -euxo pipefail
-          cd source/engine-*
-          npm ci --ignore-scripts
-          npm run build:rel:esm
-          mkdir -p ../../runtime/playcanvas
-          cp build/playcanvas.mjs ../../runtime/playcanvas/
-      - name: Build ScriptCat extension
+          node --check userscripts/transductive-prompt-runtime.chatgpt-lab-core.js
+          node --check userscripts/transductive-prompt-runtime.chatgpt-lab.user.js
+          node --check userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs
+          node userscripts/transductive-prompt-runtime.chatgpt-lab.test.cjs | tee staged-evidence/lab-test.log
+          node userscripts/transductive-prompt-runtime.chatgpt-lab-core.js | tee staged-evidence/core-self-test.log
+
+      - name: Build production extension
         shell: bash
         run: |
           set -euxo pipefail
           corepack enable
           corepack prepare pnpm@10.34.1 --activate
-          cd source/scriptcat-*
           pnpm install --frozen-lockfile --ignore-scripts
-          pnpm run build
-          cp -a dist/ext ../../runtime/scriptcat-extension
-      - name: Build GeoGebra WebSimple CAS
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cd source/geogebra-*
-          ./gradlew -p source/web web:gwtCompile web:compileSass web:mergeDeploy -Pgmodule=org.geogebra.web.WebSimple --console=plain
-          mkdir -p ../../runtime/geogebra
-          cp -a source/web/web/war/webSimple ../../runtime/geogebra/
-          cp -a source/web/web/war/css ../../runtime/geogebra/
-          cp source/web/web/war/deployggb.js ../../runtime/geogebra/
-      - name: Record runtime hashes
-        shell: bash
-        run: |
-          set -euxo pipefail
-          find runtime -type f -print0 | sort -z | xargs -0 sha256sum > runtime/SHA256SUMS
-          du -sh runtime/*
-      - name: Upload source archives
+          pnpm run build | tee staged-evidence/build.log
+          cp -a dist/ext staged-runtime/scriptcat-extension
+          find staged-runtime -type f -print0 | sort -z | xargs -0 sha256sum > staged-evidence/RUNTIME_SHA256SUMS
+
+      - name: Upload exact source
         uses: actions/upload-artifact@v4
         with:
-          name: tabweaver-pinned-source-archives
-          path: source-archives/
+          name: internalvm-scriptcat-source-${{ github.sha }}
+          path: |
+            staged-source/
+            staged-evidence/COMMIT_SHA
+            staged-evidence/GIT_STATUS.txt
+            staged-evidence/SOURCE_SHA256SUMS
           compression-level: 0
-          retention-days: 1
-      - name: Upload built runtimes
+          retention-days: 3
+
+      - name: Upload built runtime and evidence
         uses: actions/upload-artifact@v4
         with:
-          name: tabweaver-built-runtimes
-          path: runtime/
+          name: internalvm-scriptcat-runtime-${{ github.sha }}
+          path: |
+            staged-runtime/
+            staged-evidence/
           compression-level: 0
-          retention-days: 1
-          if-no-files-found: error
+          retention-days: 3
