@@ -1,6 +1,7 @@
 name: Internal VM pinned candidate source stage
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - chatgpt/internal-vm-source-stage-20260806
