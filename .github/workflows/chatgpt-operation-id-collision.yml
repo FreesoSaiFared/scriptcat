@@ -1,0 +1,35 @@
+name: chatgpt-operation-id-collision
+
+on:
+  push:
+    branches:
+      - chatgpt/torsion-node-operation-id-collision-20260807
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  red:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Establish operation-id collision red state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p chatgpt-lab/evidence-operation-id
+          set +e
+          cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_id_collision -- --nocapture >chatgpt-lab/evidence-operation-id/pre-repair.log 2>&1
+          rc=$?
+          set -e
+          echo "pre_repair_exit=$rc" > chatgpt-lab/evidence-operation-id/pre-repair-exit.txt
+          test "$rc" -ne 0
+          grep -E 'assertion.*failed|left:.*node.status|worker.register|FAILED' chatgpt-lab/evidence-operation-id/pre-repair.log
+          echo TORSION_NODE_OPERATION_ID_COLLISION_RED_VERIFIED > chatgpt-lab/evidence-operation-id/RESULT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: torsion-node-operation-id-collision-red-evidence
+          path: chatgpt-lab/evidence-operation-id/
+          if-no-files-found: error
+          retention-days: 14
