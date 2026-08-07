@@ -1,0 +1,30 @@
+--- a/packages/message/window_message.test.ts
++++ b/packages/message/window_message.test.ts
+@@ -47,6 +47,27 @@ afterEach(() => {
+ });
+ 
+ describe("ServiceWorkerMessageSend", () => {
++  it("rebinds to the current offscreen client after the document is recreated", async () => {
++    const firstClient = { url: "chrome-extension://test/src/offscreen.html", postMessage: vi.fn() };
++    const replacementClient = { url: "chrome-extension://test/src/offscreen.html", postMessage: vi.fn() };
++    const matchAll = vi
++      .fn()
++      .mockResolvedValueOnce([firstClient])
++      .mockResolvedValueOnce([replacementClient]);
++    (self as any).clients = { matchAll };
++    vi.spyOn(chrome.runtime, "getURL").mockReturnValue("chrome-extension://test/src/offscreen.html");
++
++    const swSend = new ServiceWorkerMessageSend();
++    await swSend.init();
++    await swSend.connect({ action: "offscreen/rebind" });
++
++    expect(matchAll).toHaveBeenCalledTimes(2);
++    expect(firstClient.postMessage).not.toHaveBeenCalled();
++    expect(replacementClient.postMessage).toHaveBeenCalledWith(
++      expect.objectContaining({ type: "connect", data: { action: "offscreen/rebind" } })
++    );
++  });
++
+   describe("messageHandle 处理来自 Offscreen 的请求", () => {
+     it("处理 sendMessage 类型，调用 onMessage 回调并发送响应", () => {
+       const swSend = new ServiceWorkerMessageSend();
