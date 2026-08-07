@@ -51,7 +51,10 @@ async fn it_rejects_reusing_an_operation_id_for_a_different_action() {
         }),
     )
     .await;
-    assert_eq!(receive_json(&mut client).await["data"]["authenticated"], true);
+    assert_eq!(
+        receive_json(&mut client).await["data"]["authenticated"],
+        true
+    );
 
     send_json(
         &mut client,
@@ -100,7 +103,10 @@ async fn it_rejects_reusing_an_operation_id_for_a_different_action() {
     )
     .await;
     let replay = receive_json(&mut client).await;
-    assert_eq!(replay, first, "the original idempotent receipt must remain intact");
+    assert_eq!(
+        replay, first,
+        "the original idempotent receipt must remain intact"
+    );
 
     node.shutdown().await.unwrap();
 }
