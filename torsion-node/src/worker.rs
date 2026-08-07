@@ -145,7 +145,7 @@ pub fn count_tests(output: &str) -> u64 {
     if let Some(captures) = rust_summary.captures_iter(output).last() {
         return (1..=3)
             .filter_map(|index| captures[index].parse::<u64>().ok())
-            .sum();
+            .fold(0_u64, u64::saturating_add);
     }
 
     let labelled_count = LABELLED_COUNT.get_or_init(|| {
@@ -155,7 +155,7 @@ pub fn count_tests(output: &str) -> u64 {
         let count = labelled_count
             .captures_iter(line)
             .filter_map(|capture| capture[1].parse::<u64>().ok())
-            .sum();
+            .fold(0_u64, u64::saturating_add);
         if count > 0 {
             return count;
         }
