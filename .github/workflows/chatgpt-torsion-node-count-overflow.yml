@@ -10,26 +10,31 @@ permissions:
   contents: read
 
 jobs:
-  red:
+  verify:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Establish pre-repair overflow failure
+      - name: Verify overflow regression and normal Torsion Node suite
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p chatgpt-lab/evidence-count-overflow
-          set +e
-          cargo test --locked --manifest-path torsion-node/Cargo.toml --test worker_overflow -- --nocapture >chatgpt-lab/evidence-count-overflow/pre-repair.log 2>&1
-          rc=$?
-          set -e
-          echo "pre_repair_exit=$rc" | tee chatgpt-lab/evidence-count-overflow/pre-repair-exit.txt
-          test "$rc" -ne 0
-          grep -E 'attempt to add with overflow|panicked' chatgpt-lab/evidence-count-overflow/pre-repair.log
-          echo TORSION_NODE_COUNT_OVERFLOW_RED_VERIFIED > chatgpt-lab/evidence-count-overflow/RESULT.txt
+          cargo test --locked --manifest-path torsion-node/Cargo.toml --test worker_overflow -- --nocapture | tee chatgpt-lab/evidence-count-overflow/overflow-regression.log
+          cargo test --locked --manifest-path torsion-node/Cargo.toml | tee chatgpt-lab/evidence-count-overflow/cargo-test.log
+          cargo fmt --manifest-path torsion-node/Cargo.toml -- --check
+          cat > chatgpt-lab/evidence-count-overflow/RESULT.txt <<'EOF'
+          TORSION_NODE_COUNT_OVERFLOW_REPAIR_VERIFIED
+          pre-repair red evidence: workflow run 31217210065 artifact 9008977986
+          failure: u64 iterator sum panicked with 'attempt to add with overflow'
+          repair: saturating addition for parsed Rust-summary and labelled test counts
+          overflow regression: passed
+          normal Torsion Node cargo test suite: passed
+          cargo fmt check: passed
+          EOF
+          sha256sum torsion-node/src/worker.rs torsion-node/tests/worker_overflow.rs > chatgpt-lab/evidence-count-overflow/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: torsion-node-count-overflow-red-evidence
+          name: torsion-node-count-overflow-repair-evidence
           path: chatgpt-lab/evidence-count-overflow/
           if-no-files-found: error
           retention-days: 14
