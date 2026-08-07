@@ -21,11 +21,19 @@ jobs:
           set -euo pipefail
           mkdir -p chatgpt-lab/evidence-kani
           cargo test --locked --manifest-path torsion-node/Cargo.toml | tee chatgpt-lab/evidence-kani/cargo-test.log
-      - name: Kani 0.67.0 proofs
-        uses: model-checking/kani-github-action@v0.67.0
-        with:
-          working-directory: torsion-node
-          args: --output-format=terse
+      - name: Install pinned Kani 0.67.0 on the current runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install --locked kani-verifier --version 0.67.0
+          cargo kani setup
+          cargo kani --version | tee chatgpt-lab/evidence-kani/kani-version.log
+      - name: Run bounded Kani proofs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd torsion-node
+          cargo kani --output-format=terse | tee ../chatgpt-lab/evidence-kani/kani.log
       - name: Record successful bounded proof campaign
         shell: bash
         run: |
