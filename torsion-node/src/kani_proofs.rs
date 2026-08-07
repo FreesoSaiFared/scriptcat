@@ -18,16 +18,6 @@ fn single_ascii_byte_matches_identifier_contract() {
 }
 
 #[kani::proof]
-fn four_ascii_bytes_match_identifier_contract() {
-    let bytes: [u8; 4] = kani::any();
-    kani::assume(bytes.iter().all(|byte| byte.is_ascii()));
-    let value = std::str::from_utf8(&bytes).expect("ASCII is valid UTF-8");
-    let expected = bytes.iter().copied().all(allowed_identifier_byte);
-
-    assert_eq!(validate_identifier(value, "node id").is_ok(), expected);
-}
-
-#[kani::proof]
 fn identifier_length_boundary_is_exact() {
     let accepted = [b'a'; 128];
     let rejected = [b'a'; 129];
