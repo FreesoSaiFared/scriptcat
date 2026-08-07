@@ -2,7 +2,7 @@ use std::fs;
 
 use serde_json::json;
 use tempfile::tempdir;
-use torsion_node::config::{ChannelConfig, NodeConfig};
+use torsion_node::config::{ChannelConfig, NodeConfig, validate_identifier};
 use torsion_node::protocol::CHANNEL_PROTOCOL;
 
 #[test]
@@ -52,4 +52,24 @@ fn it_preserves_the_loopback_defaults() {
 
     assert_eq!(channel.url, "ws://127.0.0.1:8642");
     assert_eq!(node.listen_url, "ws://localhost:8642");
+}
+
+#[test]
+fn it_exhaustively_matches_the_single_ascii_byte_identifier_contract() {
+    for byte in 0_u8..=127 {
+        let input = [byte];
+        let value = std::str::from_utf8(&input).unwrap();
+        let expected = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':');
+        assert_eq!(
+            validate_identifier(value, "node id").is_ok(),
+            expected,
+            "unexpected classification for ASCII byte {byte}"
+        );
+    }
+}
+
+#[test]
+fn it_enforces_the_identifier_length_boundary() {
+    assert!(validate_identifier(&"a".repeat(128), "node id").is_ok());
+    assert!(validate_identifier(&"a".repeat(129), "node id").is_err());
 }
