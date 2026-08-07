@@ -76,12 +76,9 @@ new = '''fn request_fingerprint(request: &NodeRequest) -> String {
     // Routing is deliberately excluded: forwarding the same logical request through a peer
     // must retain the same identity. NodeRequest was already parsed from JSON, so this tuple
     // is deterministically serializable; serde_json's default map representation is ordered.
-    let canonical = serde_json::to_vec(&(
-        request.requested_action,
-        &request.actor_id,
-        &request.input,
-    ))
-    .expect("deserialized node requests are serializable");
+    let canonical =
+        serde_json::to_vec(&(request.requested_action, &request.actor_id, &request.input))
+            .expect("deserialized node requests are serializable");
     format!("{:x}", Sha256::digest(canonical))
 }
 
