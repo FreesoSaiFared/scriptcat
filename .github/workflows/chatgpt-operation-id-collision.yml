@@ -10,26 +10,38 @@ permissions:
   contents: read
 
 jobs:
-  red:
+  verify:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Establish operation-id collision red state
+      - name: Apply bounded collision repair candidate
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p chatgpt-lab/evidence-operation-id
-          set +e
-          cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_id_collision -- --nocapture >chatgpt-lab/evidence-operation-id/pre-repair.log 2>&1
-          rc=$?
-          set -e
-          echo "pre_repair_exit=$rc" > chatgpt-lab/evidence-operation-id/pre-repair-exit.txt
-          test "$rc" -ne 0
-          grep -E 'assertion.*failed|left:.*node.status|worker.register|FAILED' chatgpt-lab/evidence-operation-id/pre-repair.log
-          echo TORSION_NODE_OPERATION_ID_COLLISION_RED_VERIFIED > chatgpt-lab/evidence-operation-id/RESULT.txt
+          python3 chatgpt-lab/apply-operation-id-collision-repair.py
+          cargo fmt --manifest-path torsion-node/Cargo.toml -- --check
+          git diff -- torsion-node/src/server.rs > chatgpt-lab/evidence-operation-id/accepted.diff
+      - name: Verify collision behavior and normal Torsion Node suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_id_collision -- --nocapture | tee chatgpt-lab/evidence-operation-id/collision-regression.log
+          cargo test --locked --manifest-path torsion-node/Cargo.toml | tee chatgpt-lab/evidence-operation-id/cargo-test.log
+          cat > chatgpt-lab/evidence-operation-id/RESULT.txt <<'EOF'
+          TORSION_NODE_OPERATION_ID_COLLISION_REPAIR_VERIFIED
+          pre-repair red evidence: workflow run 31218093071 artifact 9009300325
+          original behavior: second cross-action request silently replayed the first node.status receipt
+          repair: reject cross-action operation-id reuse without overwriting the original receipt
+          same-action replay: original receipt preserved
+          focused regression: passed
+          normal Torsion Node cargo test suite: passed
+          cargo fmt check: passed
+          EOF
+          sha256sum torsion-node/src/server.rs torsion-node/tests/operation_id_collision.rs chatgpt-lab/apply-operation-id-collision-repair.py > chatgpt-lab/evidence-operation-id/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: torsion-node-operation-id-collision-red-evidence
+          name: torsion-node-operation-id-collision-repair-evidence
           path: chatgpt-lab/evidence-operation-id/
           if-no-files-found: error
           retention-days: 14
