@@ -10,26 +10,41 @@ permissions:
   contents: read
 
 jobs:
-  red:
+  verify:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Establish same-action request-collision red state
+      - name: Apply bounded request-fingerprint repair
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p chatgpt-lab/evidence-request-fingerprint
-          set +e
-          cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_request_fingerprint -- --nocapture >chatgpt-lab/evidence-request-fingerprint/pre-repair.log 2>&1
-          rc=$?
-          set -e
-          echo "pre_repair_exit=$rc" > chatgpt-lab/evidence-request-fingerprint/pre-repair-exit.txt
-          test "$rc" -ne 0
-          grep -E 'assertion.*failed|left:.*succeeded|right:.*rejected|FAILED' chatgpt-lab/evidence-request-fingerprint/pre-repair.log
-          echo TORSION_NODE_SAME_ACTION_REQUEST_COLLISION_RED_VERIFIED > chatgpt-lab/evidence-request-fingerprint/RESULT.txt
+          python3 chatgpt-lab/apply-request-fingerprint-repair.py
+          cargo fmt --manifest-path torsion-node/Cargo.toml -- --check
+          git diff -- torsion-node/src/protocol.rs torsion-node/src/server.rs > chatgpt-lab/evidence-request-fingerprint/accepted.diff
+      - name: Verify request identity and normal Torsion Node suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_id_collision -- --nocapture | tee chatgpt-lab/evidence-request-fingerprint/cross-action-regression.log
+          cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_request_fingerprint -- --nocapture | tee chatgpt-lab/evidence-request-fingerprint/same-action-regression.log
+          cargo test --locked --manifest-path torsion-node/Cargo.toml | tee chatgpt-lab/evidence-request-fingerprint/cargo-test.log
+          cat > chatgpt-lab/evidence-request-fingerprint/RESULT.txt <<'EOF'
+          TORSION_NODE_REQUEST_FINGERPRINT_REPAIR_VERIFIED
+          pre-repair same-action red evidence: run 31219978254 artifact 9009985830
+          logical identity: requestedAction + actorId + input; routing target excluded
+          same exact logical request: original receipt replayed unchanged
+          same operation ID + different action: rejected
+          same operation ID + same action + different actor: rejected
+          same operation ID + same action + same actor + different input: rejected
+          legacy receipts without fingerprints retain action-level collision fallback
+          normal Torsion Node cargo test suite: passed
+          cargo fmt check: passed
+          EOF
+          sha256sum torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/tests/operation_id_collision.rs torsion-node/tests/operation_request_fingerprint.rs chatgpt-lab/apply-request-fingerprint-repair.py > chatgpt-lab/evidence-request-fingerprint/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: torsion-node-request-fingerprint-red-evidence
+          name: torsion-node-request-fingerprint-repair-evidence
           path: chatgpt-lab/evidence-request-fingerprint/
           if-no-files-found: error
           retention-days: 14
