@@ -1,0 +1,35 @@
+name: chatgpt-operation-request-fingerprint
+
+on:
+  push:
+    branches:
+      - chatgpt/torsion-node-request-fingerprint-20260807
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  red:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Establish same-action request-collision red state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p chatgpt-lab/evidence-request-fingerprint
+          set +e
+          cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_request_fingerprint -- --nocapture >chatgpt-lab/evidence-request-fingerprint/pre-repair.log 2>&1
+          rc=$?
+          set -e
+          echo "pre_repair_exit=$rc" > chatgpt-lab/evidence-request-fingerprint/pre-repair-exit.txt
+          test "$rc" -ne 0
+          grep -E 'assertion.*failed|left:.*succeeded|right:.*rejected|FAILED' chatgpt-lab/evidence-request-fingerprint/pre-repair.log
+          echo TORSION_NODE_SAME_ACTION_REQUEST_COLLISION_RED_VERIFIED > chatgpt-lab/evidence-request-fingerprint/RESULT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: torsion-node-request-fingerprint-red-evidence
+          path: chatgpt-lab/evidence-request-fingerprint/
+          if-no-files-found: error
+          retention-days: 14
