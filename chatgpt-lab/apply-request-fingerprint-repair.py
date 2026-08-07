@@ -26,6 +26,7 @@ old = '''        match self.store.begin_receipt(&pending).await {
 new = '''        match self.store.begin_receipt(&pending).await {
             Ok(BeginReceipt::Claimed) => {}
             Ok(BeginReceipt::Existing(receipt)) => {
+                let action_mismatch = receipt.requested_action != request.requested_action;
                 let fingerprint_mismatch = match (
                     receipt.request_fingerprint.as_deref(),
                     pending.request_fingerprint.as_deref(),
@@ -33,15 +34,23 @@ new = '''        match self.store.begin_receipt(&pending).await {
                     (Some(existing), Some(requested)) => existing != requested,
                     // Legacy receipts predate request fingerprints. Preserve the v7 action-level
                     // collision check rather than inventing information that was never persisted.
-                    (None, _) => receipt.requested_action != request.requested_action,
+                    (None, _) => action_mismatch,
                     (Some(_), None) => true,
                 };
                 if fingerprint_mismatch {
                     pending.final_status = FinalStatus::Rejected;
-                    pending.error = Some(format!(
-                        "operation id {} already belongs to a different request",
-                        request.operation_id
-                    ));
+                    pending.error = Some(if action_mismatch {
+                        format!(
+                            "operation id {} already belongs to {}",
+                            request.operation_id,
+                            receipt.requested_action.as_str()
+                        )
+                    } else {
+                        format!(
+                            "operation id {} already belongs to a different request",
+                            request.operation_id
+                        )
+                    });
                     pending.output_evidence = json!({
                         "existingRequestedAction": receipt.requested_action.as_str(),
                         "existingRequestFingerprint": receipt.request_fingerprint,
