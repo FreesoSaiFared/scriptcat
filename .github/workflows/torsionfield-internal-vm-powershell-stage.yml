@@ -1,0 +1,85 @@
+name: Torsionfield Internal VM PowerShell Stage
+
+on:
+  push:
+    branches:
+      - chatgpt/internal-vm-powershell-7.6.4-stage-20260807
+    paths:
+      - .github/workflows/torsionfield-internal-vm-powershell-stage.yml
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and verify official PowerShell Linux x64 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/torsionfield-powershell-kit"
+          mkdir -p "$ROOT"
+          URL='https://github.com/PowerShell/PowerShell/releases/download/v7.6.4/powershell-7.6.4-linux-x64.tar.gz'
+          EXPECTED='4471b5a36bfe86ec7af8525d36bb1cacba0128e7aac22d05cc064bc00e604721'
+          curl --fail --location --retry 3 --output "$ROOT/powershell-7.6.4-linux-x64.tar.gz" "$URL"
+          ACTUAL="$(sha256sum "$ROOT/powershell-7.6.4-linux-x64.tar.gz" | awk '{print $1}')"
+          test "$ACTUAL" = "$EXPECTED"
+          printf '%s  %s\n' "$EXPECTED" 'powershell-7.6.4-linux-x64.tar.gz' > "$ROOT/SHA256SUMS.txt"
+          printf '%s\n' 'PowerShell 7.6.4 Linux x64 portable runtime' 'Official upstream: PowerShell/PowerShell v7.6.4' 'Target use: syntax/parser validation in ChatGPT internal Debian 13 x86_64 VM' 'Upstream archive SHA-256: 4471b5a36bfe86ec7af8525d36bb1cacba0128e7aac22d05cc064bc00e604721' > "$ROOT/README.txt"
+          cat > "$ROOT/run-pwsh.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          RUNTIME="$HERE/.runtime/pwsh-7.6.4"
+          if [ ! -x "$RUNTIME/pwsh" ]; then
+            mkdir -p "$RUNTIME"
+            tar -xzf "$HERE/powershell-7.6.4-linux-x64.tar.gz" -C "$RUNTIME"
+            chmod +x "$RUNTIME/pwsh"
+          fi
+          exec "$RUNTIME/pwsh" "$@"
+          SH
+          cat > "$ROOT/Test-PowerShellSyntax.ps1" <<'PS1'
+          [CmdletBinding()]
+          param([Parameter(Mandatory, Position=0)][string[]]$Path)
+          $failed = $false
+          foreach ($item in $Path) {
+              $resolved = (Resolve-Path -LiteralPath $item -ErrorAction Stop).Path
+              $tokens = $null
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($resolved, [ref]$tokens, [ref]$errors)
+              if ($errors.Count -eq 0) {
+                  Write-Host "PASS $resolved"
+                  continue
+              }
+              $failed = $true
+              Write-Host "FAIL $resolved"
+              foreach ($errorItem in $errors) {
+                  Write-Host ("  line {0}, column {1}: {2}" -f $errorItem.Extent.StartLineNumber, $errorItem.Extent.StartColumnNumber, $errorItem.Message)
+              }
+          }
+          if ($failed) { exit 1 }
+          PS1
+          chmod +x "$ROOT/run-pwsh.sh"
+
+      - name: Smoke-test runtime and parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/torsionfield-powershell-kit"
+          "$ROOT/run-pwsh.sh" -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          printf '%s\n' 'param([string]$Name)' 'Write-Host "Hello $Name"' > "$RUNNER_TEMP/valid.ps1"
+          "$ROOT/run-pwsh.sh" -NoLogo -NoProfile -File "$ROOT/Test-PowerShellSyntax.ps1" "$RUNNER_TEMP/valid.ps1"
+          printf '%s\n' 'function Broken {' 'Write-Host "missing brace"' > "$RUNNER_TEMP/invalid.ps1"
+          if "$ROOT/run-pwsh.sh" -NoLogo -NoProfile -File "$ROOT/Test-PowerShellSyntax.ps1" "$RUNNER_TEMP/invalid.ps1"; then
+            echo 'negative control unexpectedly parsed' >&2
+            exit 1
+          fi
+
+      - name: Upload verified portable parser kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: torsionfield-internal-vm-powershell-7.6.4-debian13-x64
+          path: ${{ runner.temp }}/torsionfield-powershell-kit/
+          if-no-files-found: error
+          retention-days: 30
