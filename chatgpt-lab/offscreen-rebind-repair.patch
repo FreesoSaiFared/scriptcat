@@ -1,0 +1,25 @@
+--- a/packages/message/window_message.ts
++++ b/packages/message/window_message.ts
+@@ -249,11 +249,18 @@ export class ServiceWorkerMessageSend implements Message {
+   }
+ 
+   async init() {
+-    if (!this.target && self.clients) {
+-      const list = await self.clients.matchAll({ includeUncontrolled: true, type: "window" });
+-      // 找到offscreen.html窗口
+-      this.target = list.find((client) => client.url == chrome.runtime.getURL("src/offscreen.html")) as PostMessage;
++    if (!self.clients) return;
++    const list = await self.clients.matchAll({ includeUncontrolled: true, type: "window" });
++    // Offscreen documents can be closed and recreated while the service worker survives.
++    // Always resolve the current client instead of retaining a stale Client reference.
++    const current = list.find((client) => client.url == chrome.runtime.getURL("src/offscreen.html")) as
++      | PostMessage
++      | undefined;
++    if (!current) {
++      this.target = undefined;
++      throw new Error("ScriptCat offscreen document is unavailable");
+     }
++    this.target = current;
+   }
+ 
+   messageHandle(data: WindowMessageBody, source?: PostMessage) {
