@@ -1,0 +1,44 @@
+name: chatgpt-torsion-node-worker-mutants
+
+on:
+  push:
+    branches:
+      - chatgpt/torsion-node-count-overflow-repair-20260807
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-mutants
+        shell: bash
+        run: cargo install --locked cargo-mutants
+      - name: Mutation-test only count_tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p chatgpt-lab/evidence-worker-mutants
+          cd torsion-node
+          cargo mutants -f src/worker.rs -F 'count_tests' --timeout 30 --jobs 2 2>&1 | tee ../chatgpt-lab/evidence-worker-mutants/mutants.log
+          cp -r mutants.out ../chatgpt-lab/evidence-worker-mutants/mutants.out
+      - name: Record result
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > chatgpt-lab/evidence-worker-mutants/RESULT.txt <<'EOF'
+          TORSION_NODE_WORKER_COUNT_TESTS_MUTATION_CAMPAIGN_COMPLETED
+          target: real worker::count_tests
+          donor: sourcefrog/cargo-mutants
+          purpose: measure whether current tests kill plausible generated source mutations rather than only reach the code
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: torsion-node-worker-mutants-evidence
+          path: chatgpt-lab/evidence-worker-mutants/
+          if-no-files-found: error
+          retention-days: 14
