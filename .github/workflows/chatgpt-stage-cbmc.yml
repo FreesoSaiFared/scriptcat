@@ -1,0 +1,27 @@
+name: chatgpt-stage-cbmc
+
+on:
+  push:
+    branches:
+      - chatgpt/cbmc-stage-20260807
+  workflow_dispatch:
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download pinned CBMC 6.10.0 package
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 5 \
+            -o cbmc-6.10.0-ubuntu-24.04-amd64.deb \
+            https://github.com/diffblue/cbmc/releases/download/cbmc-6.10.0/ubuntu-24.04-cbmc-6.10.0-Linux.deb
+          echo 'd716c219c5318a54f5298f9d5f66766d599e2e37bede33224437a8ad487fc504  cbmc-6.10.0-ubuntu-24.04-amd64.deb' | sha256sum -c -
+          dpkg-deb --info cbmc-6.10.0-ubuntu-24.04-amd64.deb | sed -n '1,80p'
+      - name: Upload pinned package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cbmc-6.10.0-ubuntu-24.04-amd64
+          path: cbmc-6.10.0-ubuntu-24.04-amd64.deb
+          if-no-files-found: error
+          retention-days: 7
