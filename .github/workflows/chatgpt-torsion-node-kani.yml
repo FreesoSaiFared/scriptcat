@@ -10,47 +10,55 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  normal:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Normal Torsion Node Rust tests
         shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p chatgpt-lab/evidence-kani
-          cargo test --locked --manifest-path torsion-node/Cargo.toml | tee chatgpt-lab/evidence-kani/cargo-test.log
-      - name: Install pinned Kani 0.67.0 on the current runner
+        run: cargo test --locked --manifest-path torsion-node/Cargo.toml
+
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        harness:
+          - single_ascii_byte_matches_identifier_contract
+          - identifier_length_boundary_is_exact
+          - path_and_whitespace_bytes_never_become_identifiers
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Kani 0.67.0
         shell: bash
         run: |
           set -euo pipefail
           cargo install --locked kani-verifier --version 0.67.0
           cargo kani setup
-          cargo kani --version | tee chatgpt-lab/evidence-kani/kani-version.log
-      - name: Run bounded Kani proofs
+          cargo kani --version
+      - name: Prove ${{ matrix.harness }}
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p chatgpt-lab/evidence-kani/${{ matrix.harness }}
           cd torsion-node
-          cargo kani --output-format=terse | tee ../chatgpt-lab/evidence-kani/kani.log
-      - name: Record successful bounded proof campaign
+          timeout 300 cargo kani --harness '${{ matrix.harness }}' --output-format=terse | tee ../chatgpt-lab/evidence-kani/${{ matrix.harness }}/kani.log
+      - name: Record proof evidence
         shell: bash
         run: |
           set -euo pipefail
-          cat > chatgpt-lab/evidence-kani/RESULT.txt <<'EOF'
-          TORSION_NODE_KANI_IDENTIFIER_PROOFS_VERIFIED
-          target: real torsion-node validate_identifier contract
-          Kani: 0.67.0
-          normal cargo tests: passed
-          Kani proof suite: passed
-          proof-only source is cfg(kani), so release behavior is unchanged
+          cat > chatgpt-lab/evidence-kani/${{ matrix.harness }}/RESULT.txt <<EOF
+          TORSION_NODE_KANI_IDENTIFIER_HARNESS_VERIFIED
+          harness=${{ matrix.harness }}
+          target=real torsion-node validate_identifier contract
+          kani=0.67.0
           EOF
-          sha256sum torsion-node/src/config.rs torsion-node/src/kani_proofs.rs torsion-node/src/lib.rs > chatgpt-lab/evidence-kani/SHA256SUMS
-      - name: Upload evidence
-        uses: actions/upload-artifact@v4
+          sha256sum torsion-node/src/config.rs torsion-node/src/kani_proofs.rs torsion-node/src/lib.rs > chatgpt-lab/evidence-kani/${{ matrix.harness }}/SHA256SUMS
+      - uses: actions/upload-artifact@v4
         with:
-          name: torsion-node-kani-identifier-evidence
-          path: chatgpt-lab/evidence-kani/
+          name: torsion-node-kani-${{ matrix.harness }}
+          path: chatgpt-lab/evidence-kani/${{ matrix.harness }}/
           if-no-files-found: error
           retention-days: 14
