@@ -1,0 +1,74 @@
+name: chatgpt-offscreen-rebind-regression
+
+on:
+  push:
+    branches:
+      - chatgpt/offscreen-rebind-regression-campaign-20260807
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+      - name: Install exact JS dependencies
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.34.1 --activate
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Establish pre-repair regression failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p chatgpt-lab/evidence
+          git apply --check chatgpt-lab/offscreen-rebind-regression-test.patch
+          git apply chatgpt-lab/offscreen-rebind-regression-test.patch
+          set +e
+          pnpm exec vitest run packages/message/window_message.test.ts --no-coverage --reporter=verbose >chatgpt-lab/evidence/pre-repair-test.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          grep -F 'rebinds to the current offscreen client after the document is recreated' chatgpt-lab/evidence/pre-repair-test.log
+          grep -E 'expected.*2|AssertionError|FAIL' chatgpt-lab/evidence/pre-repair-test.log
+      - name: Apply repair candidate and rerun focused test
+        run: |
+          set -euo pipefail
+          git apply --check chatgpt-lab/offscreen-rebind-repair.patch
+          git apply chatgpt-lab/offscreen-rebind-repair.patch
+          pnpm exec vitest run packages/message/window_message.test.ts --no-coverage --reporter=verbose | tee chatgpt-lab/evidence/post-repair-test.log
+      - name: Normal gates
+        run: |
+          set -euo pipefail
+          pnpm run typecheck | tee chatgpt-lab/evidence/typecheck.log
+          pnpm run build:torsionfield | tee chatgpt-lab/evidence/build.log
+      - name: Record accepted source delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff -- packages/message/window_message.ts packages/message/window_message.test.ts > chatgpt-lab/evidence/accepted.diff
+          sha256sum chatgpt-lab/offscreen-rebind-*.patch packages/message/window_message.ts packages/message/window_message.test.ts > chatgpt-lab/evidence/SHA256SUMS
+          cat > chatgpt-lab/evidence/RESULT.txt <<'EOF'
+          OFFSCREEN_REBIND_REAL_PROJECT_REPAIR_VERIFIED
+          pre-repair regression: failed as expected
+          repair candidate: applied only after failure existed
+          focused real ScriptCat test: passed
+          TypeScript typecheck: passed
+          Torsionfield production build: passed
+          EOF
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: offscreen-rebind-repair-evidence
+          path: chatgpt-lab/evidence/
+          if-no-files-found: error
+          retention-days: 14
