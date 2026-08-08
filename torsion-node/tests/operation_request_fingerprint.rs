@@ -99,7 +99,10 @@ async fn operation_id_is_bound_to_the_full_logical_request() {
     )
     .await;
     assert_eq!(actor_collision["data"]["finalStatus"], "rejected");
-    assert_eq!(actor_collision["data"]["requestedAction"], "worker.register");
+    assert_eq!(
+        actor_collision["data"]["requestedAction"],
+        "worker.register"
+    );
     assert!(
         actor_collision["data"]["error"]
             .as_str()
