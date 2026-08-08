@@ -96,3 +96,23 @@ fn timestamp() -> String {
 if text.count(old) != 1:
     raise SystemExit(f"timestamp anchor count={text.count(old)}")
 server.write_text(text.replace(old, new), encoding="utf-8")
+
+# Existing persistence tests construct Receipt directly. The new optional durable field must
+# be represented explicitly in Rust struct literals even though serde can default it while
+# loading legacy JSON receipts. Patch only the two known fixture shapes and fail closed if
+# the source has drifted.
+persistence = Path("torsion-node/tests/persistence.rs")
+text = persistence.read_text(encoding="utf-8")
+anchors = (
+    '''        requested_action: RequestedAction::TabRegister,\n        actor: Some(actor.clone()),\n''',
+    '''        requested_action: RequestedAction::NodeStatus,\n        actor: None,\n''',
+)
+replacements = (
+    '''        requested_action: RequestedAction::TabRegister,\n        request_fingerprint: None,\n        actor: Some(actor.clone()),\n''',
+    '''        requested_action: RequestedAction::NodeStatus,\n        request_fingerprint: None,\n        actor: None,\n''',
+)
+for anchor, replacement in zip(anchors, replacements):
+    if text.count(anchor) != 1:
+        raise SystemExit(f"persistence receipt anchor count={text.count(anchor)} for {anchor!r}")
+    text = text.replace(anchor, replacement)
+persistence.write_text(text, encoding="utf-8")
