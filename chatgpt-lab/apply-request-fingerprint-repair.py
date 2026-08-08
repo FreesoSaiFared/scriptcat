@@ -70,7 +70,7 @@ old = '''            operation_id: request.operation_id.clone(),
 '''
 new = '''            operation_id: request.operation_id.clone(),
             requested_action: request.requested_action,
-            request_fingerprint: Some(request_fingerprint(request)),
+            request_fingerprint: Some(request_fingerprint(request, &self.node_id)),
             actor: None,
 '''
 if text.count(old) != 1:
@@ -79,13 +79,19 @@ text = text.replace(old, new)
 
 old = '''fn timestamp() -> String {
 '''
-new = '''fn request_fingerprint(request: &NodeRequest) -> String {
-    // Routing is deliberately excluded: forwarding the same logical request through a peer
-    // must retain the same identity. NodeRequest was already parsed from JSON, so this tuple
-    // is deterministically serializable; serde_json's default map representation is ordered.
-    let canonical =
-        serde_json::to_vec(&(request.requested_action, &request.actor_id, &request.input))
-            .expect("deserialized node requests are serializable");
+new = '''fn request_fingerprint(request: &NodeRequest, current_node_id: &str) -> String {
+    // The effective destination is part of the requested effect. Normalize a direct local
+    // request to the current node id so direct and peer-forwarded forms of the same logical
+    // request retain one identity, while changing the destination under one operation id is
+    // rejected rather than replaying another node's receipt.
+    let effective_target_node_id = request.target_node_id.as_deref().unwrap_or(current_node_id);
+    let canonical = serde_json::to_vec(&(
+        request.requested_action,
+        &request.actor_id,
+        effective_target_node_id,
+        &request.input,
+    ))
+    .expect("deserialized node requests are serializable");
     format!("{:x}", Sha256::digest(canonical))
 }
 
