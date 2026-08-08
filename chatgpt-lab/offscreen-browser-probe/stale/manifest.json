@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "Torsionfield Offscreen Client Lifecycle Probe",
+  "version": "0.1.0",
+  "permissions": ["offscreen"],
+  "background": {"service_worker": "sw.js"}
+}
