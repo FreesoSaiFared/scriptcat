@@ -12,7 +12,7 @@ index 59890da..a83fa7e 100644
      pub trust_accepted: bool,
      pub trust_classification: String,
 diff --git a/torsion-node/src/server.rs b/torsion-node/src/server.rs
-index f606a51..68e719d 100644
+index f606a51..5538e49 100644
 --- a/torsion-node/src/server.rs
 +++ b/torsion-node/src/server.rs
 @@ -321,7 +321,39 @@ impl Runtime {
@@ -64,7 +64,66 @@ index f606a51..68e719d 100644
              actor: None,
              trust_accepted: true,
              trust_classification: "trusted_installation_secret".into(),
-@@ -1203,6 +1236,22 @@ fn insert_object_field(value: &mut Value, key: &str, field: Value) {
+@@ -872,6 +905,7 @@ impl Runtime {
+                     error: anyhow!("peer is not configured: {target_node_id}"),
+                     attempt_count: 1,
+                 })?;
++        let expected_request_fingerprint = request_fingerprint(&request, &target_node_id);
+         let operation_timeout = self.peer_operation_timeout(request.requested_action);
+         let deadline = Instant::now() + operation_timeout;
+         let mut delay = PEER_RETRY_INITIAL;
+@@ -890,22 +924,41 @@ impl Runtime {
+                 .await
+             {
+                 Ok(receipt) if poll_receipt => match polled_subject_receipt(&receipt, &request) {
+-                    Ok(Some(mut subject)) if subject.final_status != FinalStatus::InProgress => {
+-                        subject.attempt_count = attempt_count;
+-                        return Ok(subject);
++                    Ok(Some(mut subject)) => {
++                        if let Err(error) = validate_peer_request_fingerprint(
++                            &subject,
++                            &expected_request_fingerprint,
++                        ) {
++                            return Err(PeerForwardError {
++                                error,
++                                attempt_count,
++                            });
++                        }
++                        if subject.final_status != FinalStatus::InProgress {
++                            subject.attempt_count = attempt_count;
++                            return Ok(subject);
++                        }
++                        anyhow!("peer operation is still in progress")
+                     }
+-                    Ok(Some(_)) => anyhow!("peer operation is still in progress"),
+                     Ok(None) => {
+                         poll_receipt = false;
+                         anyhow!("peer has not accepted the operation yet")
+                     }
+                     Err(error) => error,
+                 },
+-                Ok(mut receipt) if receipt.final_status != FinalStatus::InProgress => {
+-                    receipt.attempt_count = attempt_count;
+-                    return Ok(receipt);
+-                }
+-                Ok(_) => {
++                Ok(mut receipt) => {
++                    if let Err(error) =
++                        validate_peer_request_fingerprint(&receipt, &expected_request_fingerprint)
++                    {
++                        return Err(PeerForwardError {
++                            error,
++                            attempt_count,
++                        });
++                    }
++                    if receipt.final_status != FinalStatus::InProgress {
++                        receipt.attempt_count = attempt_count;
++                        return Ok(receipt);
++                    }
+                     poll_receipt = true;
+                     anyhow!("peer operation is still in progress")
+                 }
+@@ -1203,6 +1256,30 @@ fn insert_object_field(value: &mut Value, key: &str, field: Value) {
      }
  }
  
@@ -82,6 +141,14 @@ index f606a51..68e719d 100644
 +    ))
 +    .expect("deserialized node requests are serializable");
 +    format!("{:x}", Sha256::digest(canonical))
++}
++
++fn validate_peer_request_fingerprint(receipt: &Receipt, expected: &str) -> Result<()> {
++    match receipt.request_fingerprint.as_deref() {
++        Some(actual) if actual == expected => Ok(()),
++        Some(_) => bail!("peer returned a mismatched logical request fingerprint"),
++        None => bail!("peer receipt is missing logical request fingerprint"),
++    }
 +}
 +
  fn timestamp() -> String {
