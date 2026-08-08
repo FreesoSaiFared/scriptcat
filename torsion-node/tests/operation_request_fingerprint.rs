@@ -144,5 +144,30 @@ async fn operation_id_is_bound_to_the_full_logical_request() {
     .await;
     assert_eq!(exact_replay, input_first);
 
+    send_json(
+        &mut client,
+        serde_json::from_str(
+            r#"{"action":"node/request","data":{"protocolVersion":"torsionfield-node-v1","operationId":"json-order-equivalence","requestedAction":"node.status","input":{"alpha":1,"beta":2}}}"#,
+        )
+        .unwrap(),
+    )
+    .await;
+    let ordered_first = receive_json(&mut client).await;
+    assert_eq!(ordered_first["data"]["finalStatus"], "succeeded");
+
+    send_json(
+        &mut client,
+        serde_json::from_str(
+            r#"{"action":"node/request","data":{"protocolVersion":"torsionfield-node-v1","operationId":"json-order-equivalence","requestedAction":"node.status","input":{"beta":2,"alpha":1}}}"#,
+        )
+        .unwrap(),
+    )
+    .await;
+    let reordered_replay = receive_json(&mut client).await;
+    assert_eq!(
+        reordered_replay, ordered_first,
+        "JSON object key order must not change logical request identity"
+    );
+
     node.shutdown().await.unwrap();
 }
