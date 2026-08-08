@@ -190,14 +190,11 @@ new = '''fn request_fingerprint(request: &NodeRequest, current_node_id: &str) ->
 }
 
 fn validate_peer_request_fingerprint(receipt: &Receipt, expected: &str) -> Result<()> {
-    if receipt
-        .request_fingerprint
-        .as_deref()
-        .is_some_and(|actual| actual != expected)
-    {
-        bail!("peer returned a mismatched logical request fingerprint");
+    match receipt.request_fingerprint.as_deref() {
+        Some(actual) if actual == expected => Ok(()),
+        Some(_) => bail!("peer returned a mismatched logical request fingerprint"),
+        None => bail!("peer receipt is missing logical request fingerprint"),
     }
-    Ok(())
 }
 
 fn timestamp() -> String {
