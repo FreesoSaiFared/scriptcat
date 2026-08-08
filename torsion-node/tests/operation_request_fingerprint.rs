@@ -44,10 +44,7 @@ where
         }),
     )
     .await;
-    assert_eq!(
-        receive_json(socket).await["data"]["authenticated"],
-        true
-    );
+    assert_eq!(receive_json(socket).await["data"]["authenticated"], true);
 }
 
 async fn register_worker<S>(
