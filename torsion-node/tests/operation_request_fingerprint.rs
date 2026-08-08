@@ -28,6 +28,28 @@ where
     serde_json::from_slice(&message.into_data()).unwrap()
 }
 
+async fn authenticate<S>(socket: &mut tokio_tungstenite::WebSocketStream<S>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    send_json(
+        socket,
+        json!({
+            "action": "hello",
+            "data": {
+                "protocolVersion": CHANNEL_PROTOCOL,
+                "role": "client",
+                "token": SECRET
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        receive_json(socket).await["data"]["authenticated"],
+        true
+    );
+}
+
 async fn register_worker<S>(
     socket: &mut tokio_tungstenite::WebSocketStream<S>,
     repo: &std::path::Path,
@@ -62,23 +84,7 @@ async fn operation_id_is_bound_to_the_full_logical_request() {
     .await
     .unwrap();
     let (mut client, _) = connect_async(node.url()).await.unwrap();
-
-    send_json(
-        &mut client,
-        json!({
-            "action": "hello",
-            "data": {
-                "protocolVersion": CHANNEL_PROTOCOL,
-                "role": "client",
-                "token": SECRET
-            }
-        }),
-    )
-    .await;
-    assert_eq!(
-        receive_json(&mut client).await["data"]["authenticated"],
-        true
-    );
+    authenticate(&mut client).await;
 
     let actor_first = register_worker(
         &mut client,
@@ -170,4 +176,60 @@ async fn operation_id_is_bound_to_the_full_logical_request() {
     );
 
     node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn request_identity_survives_node_restart() {
+    let repo = tempdir().unwrap();
+    let config = NodeConfig::new(repo.path(), "node-a", "ws://127.0.0.1:0").unwrap();
+
+    let node = spawn(config.clone(), SECRET).await.unwrap();
+    let (mut client, _) = connect_async(node.url()).await.unwrap();
+    authenticate(&mut client).await;
+
+    let first = register_worker(
+        &mut client,
+        repo.path(),
+        "restart-durable-request",
+        "restart-worker",
+        "rustc",
+    )
+    .await;
+    assert_eq!(first["data"]["finalStatus"], "succeeded");
+    drop(client);
+    node.shutdown().await.unwrap();
+
+    let restarted = spawn(config, SECRET).await.unwrap();
+    let (mut client, _) = connect_async(restarted.url()).await.unwrap();
+    authenticate(&mut client).await;
+
+    let replay = register_worker(
+        &mut client,
+        repo.path(),
+        "restart-durable-request",
+        "restart-worker",
+        "rustc",
+    )
+    .await;
+    assert_eq!(
+        replay, first,
+        "the persisted logical request must replay after restart"
+    );
+
+    let collision = register_worker(
+        &mut client,
+        repo.path(),
+        "restart-durable-request",
+        "restart-worker",
+        "cargo",
+    )
+    .await;
+    assert_eq!(collision["data"]["finalStatus"], "rejected");
+    assert!(
+        collision["data"]["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("different request"))
+    );
+
+    restarted.shutdown().await.unwrap();
 }
