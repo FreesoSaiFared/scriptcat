@@ -32,6 +32,7 @@ jobs:
           cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_request_fingerprint -- --nocapture | tee chatgpt-lab/evidence-convergence/request-fingerprint.log
           cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_target_identity -- --nocapture | tee chatgpt-lab/evidence-convergence/target-identity.log
           cargo test --locked --manifest-path torsion-node/Cargo.toml --test peer_receipt_identity -- --nocapture | tee chatgpt-lab/evidence-convergence/peer-receipt-identity.log
+          cargo test --locked --manifest-path torsion-node/Cargo.toml --test peer_legacy_receipt_identity -- --nocapture | tee chatgpt-lab/evidence-convergence/peer-legacy-receipt-identity.log
           cargo test --locked --manifest-path torsion-node/Cargo.toml | tee chatgpt-lab/evidence-convergence/torsion-node.log
       - name: Install exact ScriptCat dependencies
         shell: bash
@@ -71,10 +72,11 @@ jobs:
           verified: same-operation-id/different-target-node collision rejected
           verified: direct-local and peer-forwarded forms normalize to the same effective target identity
           verified: authenticated peer receipt with a mismatched logical request fingerprint is rejected
+          verified: new peer receipts missing a logical request fingerprint are rejected rather than downgrading idempotency
           verified: exact logical request receipt replay preserved
           verified: JSON object key ordering does not alter logical request identity
           verified: request identity survives Torsion Node restart
-          verified: legacy stored receipts without fingerprints retain action-level fallback
+          verified: legacy stored local receipts without fingerprints retain action-level fallback
           verified: normalized pinned request-identity product diff matches the tested generated diff
           verified: normal Torsion Node suite passed
           verified: offscreen recreation focused suite passed
@@ -82,7 +84,7 @@ jobs:
           verified: Torsionfield production build passed
           STATUS: isolated semantic donor only; Windows authoritative integration remains for Codex.
           EOF
-          sha256sum torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/src/worker.rs packages/message/window_message.ts torsion-node/tests/operation_id_collision.rs torsion-node/tests/operation_request_fingerprint.rs torsion-node/tests/operation_target_identity.rs torsion-node/tests/peer_receipt_identity.rs chatgpt-lab/request-identity-product.diff > chatgpt-lab/evidence-convergence/SHA256SUMS
+          sha256sum torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/src/worker.rs packages/message/window_message.ts torsion-node/tests/operation_id_collision.rs torsion-node/tests/operation_request_fingerprint.rs torsion-node/tests/operation_target_identity.rs torsion-node/tests/peer_receipt_identity.rs torsion-node/tests/peer_legacy_receipt_identity.rs chatgpt-lab/request-identity-product.diff > chatgpt-lab/evidence-convergence/SHA256SUMS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
