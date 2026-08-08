@@ -77,6 +77,101 @@ if text.count(old) != 1:
     raise SystemExit(f"pending receipt anchor count={text.count(old)}")
 text = text.replace(old, new)
 
+old = '''        let operation_timeout = self.peer_operation_timeout(request.requested_action);
+        let deadline = Instant::now() + operation_timeout;
+'''
+new = '''        let expected_request_fingerprint = request_fingerprint(&request, &target_node_id);
+        let operation_timeout = self.peer_operation_timeout(request.requested_action);
+        let deadline = Instant::now() + operation_timeout;
+'''
+if text.count(old) != 1:
+    raise SystemExit(f"peer fingerprint anchor count={text.count(old)}")
+text = text.replace(old, new)
+
+old = '''            let error = match self
+                .forward_peer_once(&peer_url, &target_node_id, &outbound, remaining)
+                .await
+            {
+                Ok(receipt) if poll_receipt => match polled_subject_receipt(&receipt, &request) {
+                    Ok(Some(mut subject)) if subject.final_status != FinalStatus::InProgress => {
+                        subject.attempt_count = attempt_count;
+                        return Ok(subject);
+                    }
+                    Ok(Some(_)) => anyhow!("peer operation is still in progress"),
+                    Ok(None) => {
+                        poll_receipt = false;
+                        anyhow!("peer has not accepted the operation yet")
+                    }
+                    Err(error) => error,
+                },
+                Ok(mut receipt) if receipt.final_status != FinalStatus::InProgress => {
+                    receipt.attempt_count = attempt_count;
+                    return Ok(receipt);
+                }
+                Ok(_) => {
+                    poll_receipt = true;
+                    anyhow!("peer operation is still in progress")
+                }
+                Err(error) => {
+                    poll_receipt = true;
+                    error
+                }
+            };
+'''
+new = '''            let error = match self
+                .forward_peer_once(&peer_url, &target_node_id, &outbound, remaining)
+                .await
+            {
+                Ok(receipt) if poll_receipt => match polled_subject_receipt(&receipt, &request) {
+                    Ok(Some(mut subject)) => {
+                        if let Err(error) = validate_peer_request_fingerprint(
+                            &subject,
+                            &expected_request_fingerprint,
+                        ) {
+                            return Err(PeerForwardError {
+                                error,
+                                attempt_count,
+                            });
+                        }
+                        if subject.final_status != FinalStatus::InProgress {
+                            subject.attempt_count = attempt_count;
+                            return Ok(subject);
+                        }
+                        anyhow!("peer operation is still in progress")
+                    }
+                    Ok(None) => {
+                        poll_receipt = false;
+                        anyhow!("peer has not accepted the operation yet")
+                    }
+                    Err(error) => error,
+                },
+                Ok(mut receipt) => {
+                    if let Err(error) = validate_peer_request_fingerprint(
+                        &receipt,
+                        &expected_request_fingerprint,
+                    ) {
+                        return Err(PeerForwardError {
+                            error,
+                            attempt_count,
+                        });
+                    }
+                    if receipt.final_status != FinalStatus::InProgress {
+                        receipt.attempt_count = attempt_count;
+                        return Ok(receipt);
+                    }
+                    poll_receipt = true;
+                    anyhow!("peer operation is still in progress")
+                }
+                Err(error) => {
+                    poll_receipt = true;
+                    error
+                }
+            };
+'''
+if text.count(old) != 1:
+    raise SystemExit(f"peer result validation anchor count={text.count(old)}")
+text = text.replace(old, new)
+
 old = '''fn timestamp() -> String {
 '''
 new = '''fn request_fingerprint(request: &NodeRequest, current_node_id: &str) -> String {
@@ -93,6 +188,17 @@ new = '''fn request_fingerprint(request: &NodeRequest, current_node_id: &str) ->
     ))
     .expect("deserialized node requests are serializable");
     format!("{:x}", Sha256::digest(canonical))
+}
+
+fn validate_peer_request_fingerprint(receipt: &Receipt, expected: &str) -> Result<()> {
+    if receipt
+        .request_fingerprint
+        .as_deref()
+        .is_some_and(|actual| actual != expected)
+    {
+        bail!("peer returned a mismatched logical request fingerprint");
+    }
+    Ok(())
 }
 
 fn timestamp() -> String {
