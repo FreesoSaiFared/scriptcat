@@ -83,7 +83,10 @@ async fn it_rejects_a_peer_receipt_with_the_wrong_logical_request_fingerprint() 
         }}),
     )
     .await;
-    assert_eq!(receive_json(&mut client).await["data"]["authenticated"], true);
+    assert_eq!(
+        receive_json(&mut client).await["data"]["authenticated"],
+        true
+    );
 
     send_json(
         &mut client,
