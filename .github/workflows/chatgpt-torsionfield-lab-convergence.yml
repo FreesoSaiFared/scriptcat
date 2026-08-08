@@ -22,6 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 chatgpt-lab/apply-request-fingerprint-repair.py
+          python3 chatgpt-lab/apply-current-peer-fingerprint-fixtures.py
           cargo fmt --manifest-path torsion-node/Cargo.toml -- --check
       - name: Verify combined Torsion Node repairs
         shell: bash
@@ -53,6 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff -- torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/tests/persistence.rs > chatgpt-lab/evidence-convergence/request-identity-product.diff
+          git diff -- torsion-node/tests/server.rs > chatgpt-lab/evidence-convergence/current-peer-fixtures.diff
           grep -Ev '^(index |@@ )' chatgpt-lab/request-identity-product.diff > /tmp/pinned.diff
           grep -Ev '^(index |@@ )' chatgpt-lab/evidence-convergence/request-identity-product.diff > /tmp/generated.diff
           if ! cmp /tmp/pinned.diff /tmp/generated.diff; then
@@ -73,6 +75,7 @@ jobs:
           verified: direct-local and peer-forwarded forms normalize to the same effective target identity
           verified: authenticated peer receipt with a mismatched logical request fingerprint is rejected
           verified: new peer receipts missing a logical request fingerprint are rejected rather than downgrading idempotency
+          verified: current-peer long-worker and in-progress-poll fixtures emit the upgraded fingerprint contract
           verified: exact logical request receipt replay preserved
           verified: JSON object key ordering does not alter logical request identity
           verified: request identity survives Torsion Node restart
@@ -84,7 +87,7 @@ jobs:
           verified: Torsionfield production build passed
           STATUS: isolated semantic donor only; Windows authoritative integration remains for Codex.
           EOF
-          sha256sum torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/src/worker.rs packages/message/window_message.ts torsion-node/tests/operation_id_collision.rs torsion-node/tests/operation_request_fingerprint.rs torsion-node/tests/operation_target_identity.rs torsion-node/tests/peer_receipt_identity.rs torsion-node/tests/peer_legacy_receipt_identity.rs chatgpt-lab/request-identity-product.diff > chatgpt-lab/evidence-convergence/SHA256SUMS
+          sha256sum torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/src/worker.rs packages/message/window_message.ts torsion-node/tests/server.rs torsion-node/tests/operation_id_collision.rs torsion-node/tests/operation_request_fingerprint.rs torsion-node/tests/operation_target_identity.rs torsion-node/tests/peer_receipt_identity.rs torsion-node/tests/peer_legacy_receipt_identity.rs chatgpt-lab/request-identity-product.diff > chatgpt-lab/evidence-convergence/SHA256SUMS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
