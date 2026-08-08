@@ -31,6 +31,7 @@ jobs:
           cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_id_collision -- --nocapture | tee chatgpt-lab/evidence-convergence/operation-id.log
           cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_request_fingerprint -- --nocapture | tee chatgpt-lab/evidence-convergence/request-fingerprint.log
           cargo test --locked --manifest-path torsion-node/Cargo.toml --test operation_target_identity -- --nocapture | tee chatgpt-lab/evidence-convergence/target-identity.log
+          cargo test --locked --manifest-path torsion-node/Cargo.toml --test peer_receipt_identity -- --nocapture | tee chatgpt-lab/evidence-convergence/peer-receipt-identity.log
           cargo test --locked --manifest-path torsion-node/Cargo.toml | tee chatgpt-lab/evidence-convergence/torsion-node.log
       - name: Install exact ScriptCat dependencies
         shell: bash
@@ -53,7 +54,10 @@ jobs:
           git diff -- torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/tests/persistence.rs > chatgpt-lab/evidence-convergence/request-identity-product.diff
           grep -Ev '^(index |@@ )' chatgpt-lab/request-identity-product.diff > /tmp/pinned.diff
           grep -Ev '^(index |@@ )' chatgpt-lab/evidence-convergence/request-identity-product.diff > /tmp/generated.diff
-          cmp /tmp/pinned.diff /tmp/generated.diff
+          if ! cmp /tmp/pinned.diff /tmp/generated.diff; then
+            printf '%s\n' 'PINNED_PRODUCT_DIFF_MISMATCH' > chatgpt-lab/evidence-convergence/PIN_MISMATCH.txt
+            exit 1
+          fi
           cat > chatgpt-lab/evidence-convergence/RESULT.txt <<'EOF'
           TORSIONFIELD_ISOLATED_CONVERGENCE_VERIFIED
           base: chatgpt/torsion-node-count-overflow-repair-20260807 @ 8dfa71ba3367489f17a8443f611bc774b70b45ce
@@ -66,10 +70,11 @@ jobs:
           verified: same-action/different-input collision rejected
           verified: same-operation-id/different-target-node collision rejected
           verified: direct-local and peer-forwarded forms normalize to the same effective target identity
+          verified: authenticated peer receipt with a mismatched logical request fingerprint is rejected
           verified: exact logical request receipt replay preserved
           verified: JSON object key ordering does not alter logical request identity
           verified: request identity survives Torsion Node restart
-          verified: legacy receipts without fingerprints retain action-level fallback
+          verified: legacy stored receipts without fingerprints retain action-level fallback
           verified: normalized pinned request-identity product diff matches the tested generated diff
           verified: normal Torsion Node suite passed
           verified: offscreen recreation focused suite passed
@@ -77,8 +82,9 @@ jobs:
           verified: Torsionfield production build passed
           STATUS: isolated semantic donor only; Windows authoritative integration remains for Codex.
           EOF
-          sha256sum torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/src/worker.rs packages/message/window_message.ts torsion-node/tests/operation_id_collision.rs torsion-node/tests/operation_request_fingerprint.rs torsion-node/tests/operation_target_identity.rs chatgpt-lab/request-identity-product.diff > chatgpt-lab/evidence-convergence/SHA256SUMS
+          sha256sum torsion-node/src/protocol.rs torsion-node/src/server.rs torsion-node/src/worker.rs packages/message/window_message.ts torsion-node/tests/operation_id_collision.rs torsion-node/tests/operation_request_fingerprint.rs torsion-node/tests/operation_target_identity.rs torsion-node/tests/peer_receipt_identity.rs chatgpt-lab/request-identity-product.diff > chatgpt-lab/evidence-convergence/SHA256SUMS
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: torsionfield-isolated-convergence-evidence
           path: chatgpt-lab/evidence-convergence/
