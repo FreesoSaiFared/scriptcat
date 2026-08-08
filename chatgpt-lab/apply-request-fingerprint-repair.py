@@ -146,10 +146,9 @@ new = '''            let error = match self
                     Err(error) => error,
                 },
                 Ok(mut receipt) => {
-                    if let Err(error) = validate_peer_request_fingerprint(
-                        &receipt,
-                        &expected_request_fingerprint,
-                    ) {
+                    if let Err(error) =
+                        validate_peer_request_fingerprint(&receipt, &expected_request_fingerprint)
+                    {
                         return Err(PeerForwardError {
                             error,
                             attempt_count,
