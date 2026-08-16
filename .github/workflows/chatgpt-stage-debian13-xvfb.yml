@@ -1,0 +1,42 @@
+name: ChatGPT stage Debian 13 Xvfb fallback
+
+on:
+  push:
+    branches:
+      - chatgpt/stage-chrome-cft-152-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download Debian 13 Xvfb package closure in Debian 13 container
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p xvfb-stage/debs
+          docker run --rm -v "$PWD/xvfb-stage:/out" debian:13-slim bash -lc '
+            set -euo pipefail
+            apt-get update
+            apt-get install -y --download-only --no-install-recommends xvfb xauth
+            cp /var/cache/apt/archives/*.deb /out/debs/
+            dpkg-query -W > /out/container-installed-packages.txt
+            apt-cache policy xvfb xserver-common xkb-data x11-xkb-utils xauth > /out/package-policy.txt
+          '
+          sha256sum xvfb-stage/debs/*.deb | tee xvfb-stage/debs.sha256
+          du -sh xvfb-stage/debs
+          ls -lh xvfb-stage/debs
+      - name: Upload Debian 13 Xvfb closure
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian13-xvfb-offline-debs
+          compression-level: 0
+          path: |
+            xvfb-stage/debs/
+            xvfb-stage/debs.sha256
+            xvfb-stage/package-policy.txt
+            xvfb-stage/container-installed-packages.txt
