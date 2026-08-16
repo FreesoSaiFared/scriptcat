@@ -1,0 +1,64 @@
+name: ChatGPT stage Chrome for Testing 152
+
+on:
+  push:
+    branches:
+      - chatgpt/stage-chrome-cft-152-20260816
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download official pinned Chrome for Testing
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.42/linux64/chrome-linux64.zip'
+          curl -fL --retry 4 --retry-all-errors --connect-timeout 20 "$URL" -o chrome-linux64-152.0.7977.42.zip
+          unzip -tq chrome-linux64-152.0.7977.42.zip
+          sha256sum chrome-linux64-152.0.7977.42.zip | tee chrome-linux64-152.0.7977.42.zip.sha256
+          stat -c 'bytes=%s' chrome-linux64-152.0.7977.42.zip | tee chrome-linux64-152.0.7977.42.zip.size
+          mkdir -p parts
+          split -b 64M -d -a 2 chrome-linux64-152.0.7977.42.zip parts/chrome-linux64-152.0.7977.42.zip.part.
+          sha256sum parts/* | tee parts.sha256
+          ls -lh chrome-linux64-152.0.7977.42.zip parts/*
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-cft-152-manifest
+          compression-level: 0
+          path: |
+            chrome-linux64-152.0.7977.42.zip.sha256
+            chrome-linux64-152.0.7977.42.zip.size
+            parts.sha256
+      - name: Upload part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-cft-152-part-00
+          compression-level: 0
+          path: parts/chrome-linux64-152.0.7977.42.zip.part.00
+      - name: Upload part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-cft-152-part-01
+          compression-level: 0
+          path: parts/chrome-linux64-152.0.7977.42.zip.part.01
+      - name: Upload part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-cft-152-part-02
+          compression-level: 0
+          if-no-files-found: ignore
+          path: parts/chrome-linux64-152.0.7977.42.zip.part.02
+      - name: Upload part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-cft-152-part-03
+          compression-level: 0
+          if-no-files-found: ignore
+          path: parts/chrome-linux64-152.0.7977.42.zip.part.03
