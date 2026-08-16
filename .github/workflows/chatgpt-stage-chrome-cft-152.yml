@@ -18,6 +18,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo 'staging-run=2026-08-16'
           URL='https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.42/linux64/chrome-linux64.zip'
           curl -fL --retry 4 --retry-all-errors --connect-timeout 20 "$URL" -o chrome-linux64-152.0.7977.42.zip
           unzip -tq chrome-linux64-152.0.7977.42.zip
