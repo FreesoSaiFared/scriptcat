@@ -1,0 +1,173 @@
+name: ChatGPT stage Miegakure free art quarry
+
+on:
+  push:
+    branches:
+      - chatgpt/miegakure-free-art-quarry-20260817
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Fetch CC0 quarry archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p quarry
+          fetch() {
+            local name="$1" url="$2"
+            echo "FETCH $name"
+            curl -fL --retry 4 --retry-all-errors --connect-timeout 20 "$url" -o "quarry/$name"
+            unzip -tq "quarry/$name"
+            sha256sum "quarry/$name"
+          }
+          fetch stylized_nature_megakitstandard.zip 'https://opengameart.org/sites/default/files/stylized_nature_megakitstandard.zip'
+          fetch medieval_village_megakitstandard.zip 'https://opengameart.org/sites/default/files/medieval_village_megakitstandard.zip'
+          fetch fantasy_props_megakitstandard.zip 'https://opengameart.org/sites/default/files/fantasy_props_megakitstandard.zip'
+          fetch universal_animation_library_2standard.zip 'https://opengameart.org/sites/default/files/universal_animation_library_2standard.zip'
+          fetch universal_animation_librarystandard.zip 'https://opengameart.org/sites/default/files/universal_animation_librarystandard.zip'
+          fetch ultimate_animated_character_pack_by_quaternius.zip 'https://opengameart.org/sites/default/files/ultimate_animated_character_pack_by_quaternius.zip'
+          fetch kaykit_character_animations_1.2.zip 'https://opengameart.org/sites/default/files/kaykit_character_animations_1.2.zip'
+          fetch kaykit_medieval_builder_pack_1.0.zip 'https://opengameart.org/sites/default/files/kaykit_medieval_builder_pack_1.0.zip'
+          fetch kaykit_dungeon_pack_1.0.zip 'https://opengameart.org/sites/default/files/kaykit_dungeon_pack_1.0.zip'
+          fetch kaykit_mini-game_variety_pack_1.2.zip 'https://opengameart.org/sites/default/files/kaykit_mini-game_variety_pack_1.2.zip'
+          (cd quarry && sha256sum *.zip | sort -k2) | tee quarry/SHA256SUMS.txt
+          du -h quarry/*.zip
+
+      - name: Try current KayKit Forest public Patreon attachment
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -u
+          url='https://www.patreon.com/file?h=126432684&m=452377741'
+          curl -fL --retry 3 --connect-timeout 20 "$url" -o 'quarry/KayKit_Forest_Nature_Pack_public.zip' || exit 0
+          unzip -tq 'quarry/KayKit_Forest_Nature_Pack_public.zip' || { rm -f 'quarry/KayKit_Forest_Nature_Pack_public.zip'; exit 0; }
+          sha256sum 'quarry/KayKit_Forest_Nature_Pack_public.zip'
+
+      - name: Resolve current KayKit Platformer public Patreon attachment
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -u
+          page='https://www.patreon.com/kaylousberg/posts/platformer-pack-122994247'
+          html=$(mktemp)
+          curl -fL --retry 3 --connect-timeout 20 "$page" -o "$html" || exit 0
+          fileurl=$(grep -oE 'https?://[^" ]+|/file\?h=122994247&amp;m=[0-9]+|/file\?h=122994247&m=[0-9]+' "$html" | grep 'file.?h=122994247' | head -1 | sed 's/&amp;/\&/g')
+          if [ -z "$fileurl" ]; then
+            mid=$(grep -oE '122994247[^0-9]{1,80}[0-9]{6,12}' "$html" | grep -oE '[0-9]{6,12}$' | head -1)
+            [ -n "$mid" ] && fileurl="https://www.patreon.com/file?h=122994247&m=$mid"
+          fi
+          [ -n "$fileurl" ] || exit 0
+          case "$fileurl" in http*) ;; *) fileurl="https://www.patreon.com$fileurl" ;; esac
+          curl -fL --retry 3 --connect-timeout 20 "$fileurl" -o 'quarry/KayKit_Platformer_Pack_public.zip' || exit 0
+          unzip -tq 'quarry/KayKit_Platformer_Pack_public.zip' || { rm -f 'quarry/KayKit_Platformer_Pack_public.zip'; exit 0; }
+          sha256sum 'quarry/KayKit_Platformer_Pack_public.zip'
+
+      - name: Build provenance manifest
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          root=pathlib.Path('quarry')
+          items=[]
+          for p in sorted(root.glob('*.zip')):
+              h=hashlib.sha256(p.read_bytes()).hexdigest()
+              items.append({'filename':p.name,'bytes':p.stat().st_size,'sha256':h})
+          manifest={
+            'schema':1,
+            'purpose':'Miegakure clean-room visual asset quarry',
+            'license_policy':'Only archives whose source page identifies the original author and CC0/public-domain status are included.',
+            'sources':{
+              'opengameart':'OpenGameArt direct attachment mirrors; provenance pages identify Kay Lousberg or Quaternius and CC0.',
+              'kaykit_forest':'Official Kay Lousberg public Patreon attachment if resolver succeeds.',
+              'kaykit_platformer':'Official Kay Lousberg public Patreon attachment if resolver succeeds.'
+            },
+            'items':items
+          }
+          (root/'QUARRY_MANIFEST.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          print(json.dumps(manifest,indent=2))
+          PY
+
+      - name: Upload stylized nature
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-stylized-nature
+          compression-level: 0
+          path: quarry/stylized_nature_megakitstandard.zip
+      - name: Upload medieval village
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-medieval-village
+          compression-level: 0
+          path: quarry/medieval_village_megakitstandard.zip
+      - name: Upload fantasy props
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-fantasy-props
+          compression-level: 0
+          path: quarry/fantasy_props_megakitstandard.zip
+      - name: Upload animation library 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-animation-library-2
+          compression-level: 0
+          path: quarry/universal_animation_library_2standard.zip
+      - name: Upload animation library 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-animation-library-1
+          compression-level: 0
+          path: quarry/universal_animation_librarystandard.zip
+      - name: Upload animated characters
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-animated-characters
+          compression-level: 0
+          path: quarry/ultimate_animated_character_pack_by_quaternius.zip
+      - name: Upload KayKit animations
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-kaykit-animations
+          compression-level: 0
+          path: quarry/kaykit_character_animations_1.2.zip
+      - name: Upload KayKit medieval builder
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-kaykit-medieval-builder
+          compression-level: 0
+          path: quarry/kaykit_medieval_builder_pack_1.0.zip
+      - name: Upload KayKit dungeon
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-kaykit-dungeon
+          compression-level: 0
+          path: quarry/kaykit_dungeon_pack_1.0.zip
+      - name: Upload KayKit mini-game
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-kaykit-minigame
+          compression-level: 0
+          path: quarry/kaykit_mini-game_variety_pack_1.2.zip
+      - name: Upload optional current KayKit packs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: miegakure-quarry-kaykit-current-optional
+          compression-level: 0
+          if-no-files-found: ignore
+          path: |
+            quarry/KayKit_Forest_Nature_Pack_public.zip
+            quarry/KayKit_Platformer_Pack_public.zip
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quarry-manifest
+          compression-level: 0
+          path: |
+            quarry/QUARRY_MANIFEST.json
+            quarry/SHA256SUMS.txt
