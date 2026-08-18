@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - chatgpt/miegakure-kimono-glb-20260818
+  pull_request:
+    branches:
+      - chatgpt/miegakure-free-art-quarry-20260817
   workflow_dispatch:
 
 permissions:
