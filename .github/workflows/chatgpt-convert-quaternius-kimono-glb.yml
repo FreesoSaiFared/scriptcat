@@ -1,0 +1,63 @@
+name: ChatGPT convert Quaternius kimono hero
+
+on:
+  push:
+    branches:
+      - chatgpt/miegakure-kimono-glb-20260818
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install Blender
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends blender
+          blender --version | head -3
+      - name: Fetch verified CC0 Quaternius source
+        run: |
+          set -euo pipefail
+          curl -fL --retry 4 --retry-all-errors 'https://opengameart.org/sites/default/files/ultimate_animated_character_pack_by_quaternius.zip' -o source.zip
+          echo '0295062cbc72da52ee804f39ac38694901a40458011f9b2638fc7ef13ed509da  source.zip' | sha256sum -c -
+          unzip -j source.zip 'Ultimate Animated Character Pack - Nov 2019/Blends/Kimono_Male.blend' -d work
+      - name: Export all actions to GLB
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cat > /tmp/export.py <<'PY'
+          import bpy, json, hashlib, os
+          arms=[o for o in bpy.data.objects if o.type=='ARMATURE']
+          if not arms: raise RuntimeError('no armature')
+          arm=arms[0]
+          if arm.animation_data is None: arm.animation_data_create()
+          # Convert every action into a named NLA track so glTF exports all clips.
+          arm.animation_data.action=None
+          while arm.animation_data.nla_tracks:
+              arm.animation_data.nla_tracks.remove(arm.animation_data.nla_tracks[0])
+          actions=list(bpy.data.actions)
+          for action in actions:
+              track=arm.animation_data.nla_tracks.new(); track.name=action.name
+              start=int(action.frame_range[0]); strip=track.strips.new(action.name,start,action)
+              strip.action_frame_start=action.frame_range[0]; strip.action_frame_end=action.frame_range[1]
+          out=os.path.abspath('out/Kimono_Male_AllActions.glb')
+          bpy.ops.export_scene.gltf(filepath=out, export_format='GLB', export_animations=True, export_nla_strips=True, export_skins=True, export_morph=False)
+          data=open(out,'rb').read()
+          report={'armature':arm.name,'actions':[a.name for a in actions],'action_count':len(actions),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+          open('out/REPORT.json','w').write(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          PY
+          blender -b work/Kimono_Male.blend --python /tmp/export.py
+          sha256sum out/*
+      - name: Upload converted hero
+        uses: actions/upload-artifact@v4
+        with:
+          name: miegakure-quaternius-kimono-glb
+          compression-level: 0
+          path: out/
