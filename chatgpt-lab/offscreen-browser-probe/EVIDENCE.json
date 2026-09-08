@@ -1,0 +1,67 @@
+{
+  "status": "VERIFIED_IN_LIVE_INTERNAL_VM_CHROMIUM",
+  "environment": {
+    "os": "Debian GNU/Linux 13 (trixie)",
+    "chromium": "144.0.7559.96",
+    "node": "22.16.0",
+    "vcpus": 5
+  },
+  "stale": {
+    "mode": "stale",
+    "serviceWorkerTargetBefore": "98A5BD2678CD3FA75661A11868B2BA3A",
+    "serviceWorkerTargetAfter": "98A5BD2678CD3FA75661A11868B2BA3A",
+    "serviceWorkerSurvived": true,
+    "first": {
+      "targetId": "ea2fcb63-29a1-4536-be54-dfa28c612d19",
+      "targetUrl": "chrome-extension://odjmcffelmgdekmchpkhlglngdahndpp/offscreen.html",
+      "kind": "tf-probe-response",
+      "messageId": "65eeb36d-64d8-4bfc-8acc-29749305cb94",
+      "generation": "a0d1be30-b897-4c62-a72d-b1150049a1d0",
+      "href": "chrome-extension://odjmcffelmgdekmchpkhlglngdahndpp/offscreen.html"
+    },
+    "recreation": {
+      "beforeId": "ea2fcb63-29a1-4536-be54-dfa28c612d19",
+      "afterId": "35aa30eb-528c-4ad9-b2f3-945fcf670544",
+      "changed": true
+    },
+    "error": "probe timeout"
+  },
+  "repaired": {
+    "mode": "repaired",
+    "serviceWorkerTargetBefore": "5427C9DA0D868B59A9524B5410643C76",
+    "serviceWorkerTargetAfter": "5427C9DA0D868B59A9524B5410643C76",
+    "serviceWorkerSurvived": true,
+    "first": {
+      "targetId": "bf1f1485-83db-485f-af24-e4fab354d20d",
+      "targetUrl": "chrome-extension://legocidbbjamlnecgklhgngnalfccfjh/offscreen.html",
+      "kind": "tf-probe-response",
+      "messageId": "46f84c88-00e6-4520-ae26-5b55644cbbb9",
+      "generation": "f6788b7f-88a3-48db-9eec-8bf3d9f8d53c",
+      "href": "chrome-extension://legocidbbjamlnecgklhgngnalfccfjh/offscreen.html"
+    },
+    "recreation": {
+      "beforeId": "bf1f1485-83db-485f-af24-e4fab354d20d",
+      "afterId": "b8b65021-aadb-4084-9edc-0a19e395b00a",
+      "changed": true
+    },
+    "second": {
+      "targetId": "b8b65021-aadb-4084-9edc-0a19e395b00a",
+      "targetUrl": "chrome-extension://legocidbbjamlnecgklhgngnalfccfjh/offscreen.html",
+      "kind": "tf-probe-response",
+      "messageId": "f0c7da35-31fa-4a1d-8512-1b09cfa757b6",
+      "generation": "24ecd023-d3d8-4715-a01c-d8f8939a09cb",
+      "href": "chrome-extension://legocidbbjamlnecgklhgngnalfccfjh/offscreen.html"
+    },
+    "error": null
+  },
+  "claims": {
+    "offscreen_client_id_changes_on_recreation": true,
+    "service_worker_survives_recreation": true,
+    "cached_old_client_fails": true,
+    "reresolved_current_client_succeeds": true
+  },
+  "driveArtifact": {
+    "id": "1YwtAM8Y1z74s02gMSwHdsNHw3HChQBux",
+    "sha256": "e9307ce3782368c4dfd01be510b06aaa15cd4f808d3ba94c6aaac8962773bf5f"
+  }
+}
