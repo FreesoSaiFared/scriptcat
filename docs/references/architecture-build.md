@@ -13,8 +13,7 @@ UI pages (React): popup · options · install · batchupdate · confirm · impor
 workers         : editor.worker · ts.worker · json.worker (Monaco) · linter.worker
 ```
 
-For the exact current set, check [`rspack.config.ts`](../../rspack.config.ts)'s `entry` block directly — this
-list is a snapshot and can drift when an entry is added or removed.
+For the exact current set, read [`rspack.config.ts`](../../rspack.config.ts)'s `entry` block.
 
 Output goes to `dist/ext/src/[name].js` (cleaned each build). Notable behavior:
 
@@ -68,7 +67,7 @@ permissions, and keeps `sandbox` (its sandbox iframe is a real manifest sandbox 
 [architecture.md § Chrome vs Firefox: the offscreen split](../architecture.md#chrome-vs-firefox-the-offscreen-split)),
 adds `webRequestBlocking` to `optional_permissions` (for the experimental keep-alive loop), sets
 `incognito: "spanning"` (Firefox has no `"split"` mode), adds `browser_specific_settings` (Gecko ID, min
-Firefox 154.0a1 — Nightly, for `sandbox`-manifest support), and filters Chrome-only permissions. By default it
+Firefox 154.0, where `sandbox`-manifest support shipped to release), and filters Chrome-only permissions. By default it
 writes the Chrome zip and a `.crx` signed with `dist/scriptcat.pem` (which you must supply locally); ScriptCat
 MV3 officially supports Firefox, so `PACK_FIREFOX` is `true` by default and the Firefox zip is built too.
 

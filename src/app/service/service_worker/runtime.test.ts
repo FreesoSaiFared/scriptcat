@@ -288,6 +288,60 @@ describe.concurrent("RuntimeService - getPageScriptMatchingResultByUrl 脚本匹
     });
   });
 
+  it.concurrent("match 覆盖清空后此前的匹配规则不再生效，但仍以未生效列出", async () => {
+    const { runtime } = createRuntimeTestContext();
+    const script = createMockScript({
+      metadata: { match: ["https://www.example.com/*"] },
+      selfMetadata: { match: ["https://www.example.com/*"] },
+    });
+
+    await runtime.applyScriptMatchInfo(createScriptRunResource(script));
+    expect(runtime.getPageScriptMatchingResultByUrl("https://www.example.com/").has(script.uuid)).toBe(true);
+
+    const emptyMatchOverride = createScriptRunResource({
+      ...script,
+      selfMetadata: { match: [] },
+    });
+    await runtime.applyScriptMatchInfo(emptyMatchOverride);
+
+    expect(runtime.getPageScriptMatchingResultByUrl("https://www.example.com/").has(script.uuid)).toBe(false);
+    // 原始规则仍在匹配器内，Popup 才能把它列为未生效并给出「允许在此执行」的恢复入口
+    expect(runtime.getPageScriptMatchingResultByUrl("https://www.example.com/", true).get(script.uuid)?.effective).toBe(
+      false
+    );
+  });
+
+  it.concurrent("match 覆盖清空的脚本不应被注册（空规则会被 UserScripts API 退回成全站匹配）", async () => {
+    const { runtime } = createRuntimeTestContext();
+    (runtime as any).resource = { getScriptResourceValue: vi.fn().mockResolvedValue({}) };
+    const script = createMockScript({
+      metadata: { match: ["https://www.example.com/*"] },
+      selfMetadata: { match: [] },
+    });
+
+    expect(await runtime.buildAndSaveCompiledResourceFromScript(script)).toBeUndefined();
+  });
+
+  it.concurrent("空匹配覆盖时应删除持久化 CompiledResource 并注销旧注册", async () => {
+    const { runtime, mockScriptService } = createRuntimeTestContext();
+    const script = createMockScript({
+      metadata: { match: ["https://www.example.com/*"] },
+      selfMetadata: { match: [] },
+      status: SCRIPT_STATUS_ENABLE,
+    });
+    const scriptRunResource = createScriptRunResource(script);
+    mockScriptService.buildScriptRunResource.mockResolvedValue(scriptRunResource);
+
+    const deleteSpy = vi.spyOn(runtime.compiledResourceDAO, "delete").mockResolvedValue(undefined);
+    const unregisterSpy = vi.spyOn(runtime, "unregistryPageScripts").mockResolvedValue(undefined);
+
+    await runtime.updateResourceOnScriptChange(script);
+
+    // 空覆盖 = 全站不匹配：旧 CompiledResource 与浏览器注册必须被清掉，否则 SW 重启后旧范围复活
+    expect(deleteSpy).toHaveBeenCalledWith(script.uuid);
+    expect(unregisterSpy).toHaveBeenCalledWith([script.uuid]);
+  });
+
   describe.concurrent("includeDisabled 选项", () => {
     it.concurrent("当 includeDisabled=false 时不返回禁用脚本；当 includeDisabled=true 时返回禁用脚本", async () => {
       // Arrange
@@ -635,7 +689,7 @@ const _createRuntimeContext = () => {
     use: vi.fn().mockReturnThis(),
     emit: vi.fn(),
     publish: vi.fn(),
-  } as unknown as Group;
+  };
   const mockSender = {
     async init() {},
     messageHandle(_data: WindowMessageBody) {},
@@ -650,7 +704,7 @@ const _createRuntimeContext = () => {
   const mockScriptDAO = { all: vi.fn().mockResolvedValue([]), gets: vi.fn().mockResolvedValue([]) };
   const runtime = new RuntimeService(
     mockSystemConfig as unknown as SystemConfig,
-    mockGroup,
+    mockGroup as unknown as Group,
     mockSender,
     mockMQ,
     {} as ValueService,
@@ -659,7 +713,7 @@ const _createRuntimeContext = () => {
     mockScriptDAO as unknown as ScriptDAO,
     new LocalStorageDAO()
   );
-  return { runtime, mockSystemConfig, mockScriptService, mockScriptDAO };
+  return { runtime, mockSystemConfig, mockScriptService, mockScriptDAO, mockGroup };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -989,6 +1043,22 @@ describe("pageLoad 按消息发送方标签页区分隐身上下文", () => {
       tabId: incognito ? 22 : 11,
       frameId: 0,
       incognito,
+    });
+  });
+
+  // bfcache 还原不会重新注入 content script，页面里的脚本却还活着；
+  // 这条上报只用来重新确认「本页扩展触及得到」，绝不能顺带重放脚本。
+  it("bfcache 还原上报只广播 popupPageRestored，不重新下发脚本", async () => {
+    const { runtime, mockGroup } = _createRuntimeContext();
+    const getScriptsForTab = vi.spyOn(runtime, "getScriptsForTab");
+
+    await runtime.pageShow(undefined, new SenderRuntime(createSender(false)));
+
+    expect(getScriptsForTab).not.toHaveBeenCalled();
+    expect(mockGroup.emit).toHaveBeenCalledWith("popupPageRestored", {
+      tabId: 11,
+      frameId: 0,
+      url: "https://www.example.com/page",
     });
   });
 });
