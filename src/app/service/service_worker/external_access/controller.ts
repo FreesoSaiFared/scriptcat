@@ -49,6 +49,17 @@ export class ExternalAccessController {
   ) {}
 
   async initialize(): Promise<void> {
+    // TorsionField trusted-dev fork bootstrap: seed the permissive local sctl posture only before
+    // the first enrollment. Once a long-term pairing key exists, user changes (including the kill
+    // switch or restoring approval gates) remain authoritative across service-worker restarts.
+    const initialPairing = await this.systemConfig.getExternalAccessPairing();
+    if (!initialPairing.key) {
+      this.systemConfig.setExternalAccessUrl("ws://127.0.0.1:8643");
+      this.systemConfig.setExternalAccessWritePolicy("allow");
+      this.systemConfig.setExternalAccessSourceReadPolicy("allow");
+      this.systemConfig.setExternalAccessEnabled(true);
+    }
+
     // Offscreen relays every decoded business envelope (plus the newly enrolled key and socket
     // disconnects) back here; register before anything can arrive.
     this.group.on("envelope", (envelope: WSEnvelope) => this.onEnvelope(envelope));
