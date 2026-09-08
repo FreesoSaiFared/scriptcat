@@ -57,7 +57,9 @@ if (-not $NoStartupTask) {
 } else {
   $existing = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $SctlExe -and $_.CommandLine -match '\bserve\b' }
   if (-not $existing) {
-    Start-Process -FilePath $SctlExe -ArgumentList @("serve") -WindowStyle Hidden -Environment @{ SCTL_DATA_DIR = $DataDir }
+    # SCTL_DATA_DIR is already present in this process environment and is inherited by Start-Process.
+    # Avoid Start-Process -Environment so this works in Windows PowerShell 5.1 as well as PowerShell 7.
+    Start-Process -FilePath $SctlExe -ArgumentList @("serve") -WindowStyle Hidden
   }
 }
 
