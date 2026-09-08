@@ -25,6 +25,7 @@ function makeConnectClient() {
 }
 
 const DEFAULT_URL = "ws://localhost:8643";
+const TRUSTED_DEV_URL = "ws://127.0.0.1:8643";
 
 describe("ExternalAccessController（外部接入 · 扁平信任）", () => {
   let systemConfig: SystemConfig;
@@ -70,18 +71,41 @@ describe("ExternalAccessController（外部接入 · 扁平信任）", () => {
     return controller;
   }
 
-  it("external_access_enabled=false 时只注册监听，不建立连接", async () => {
+  it("TorsionField 首次接入前自动启用本机 sctl 并进入 pending_enrollment", async () => {
     const controller = makeController();
     await controller.initialize();
+
+    expect(await systemConfig.getExternalAccessEnabled()).toBe(true);
+    expect(await systemConfig.getExternalAccessUrl()).toBe(TRUSTED_DEV_URL);
+    expect(await systemConfig.getExternalAccessWritePolicy()).toBe("allow");
+    expect(await systemConfig.getExternalAccessSourceReadPolicy()).toBe("allow");
+    expect(controller.getStatus().status).toBe("pending_enrollment");
     expect(connectClient.connect).not.toHaveBeenCalled();
-    expect(controller.getStatus().status).toBe("disabled");
   });
 
-  it("已启用但未接入时不拨号，状态为 pending_enrollment", async () => {
+  it("首次 bootstrap 后显式关闭 External Access 会立即停止当前控制器", async () => {
     const controller = makeController();
     await controller.initialize();
-    systemConfig.setExternalAccessEnabled(true);
-    await vi.waitFor(() => expect(controller.getStatus().status).toBe("pending_enrollment"));
+    systemConfig.setExternalAccessEnabled(false);
+    await vi.waitFor(() => expect(controller.getStatus().status).toBe("disabled"));
+    expect(connectClient.disconnect).toHaveBeenCalled();
+  });
+
+  it("已有长期配对时不覆盖用户的 URL、策略或启用状态", async () => {
+    systemConfig.setExternalAccessPairing({ key: "abc123", clientId: "cid" });
+    systemConfig.setExternalAccessUrl("ws://localhost:9999");
+    systemConfig.setExternalAccessWritePolicy("approval");
+    systemConfig.setExternalAccessSourceReadPolicy("approval");
+    systemConfig.setExternalAccessEnabled(false);
+
+    const controller = makeController();
+    await controller.initialize();
+
+    expect(await systemConfig.getExternalAccessEnabled()).toBe(false);
+    expect(await systemConfig.getExternalAccessUrl()).toBe("ws://localhost:9999");
+    expect(await systemConfig.getExternalAccessWritePolicy()).toBe("approval");
+    expect(await systemConfig.getExternalAccessSourceReadPolicy()).toBe("approval");
+    expect(controller.getStatus().status).toBe("disabled");
     expect(connectClient.connect).not.toHaveBeenCalled();
   });
 
@@ -97,7 +121,7 @@ describe("ExternalAccessController（外部接入 · 扁平信任）", () => {
     await controller.initialize();
     await controller.enroll("PAIR-CODE");
     expect(connectClient.connect).toHaveBeenCalledWith({
-      url: DEFAULT_URL,
+      url: TRUSTED_DEV_URL,
       auth: { mode: "pairing", code: "PAIR-CODE" },
     });
     expect(controller.getStatus().status).toBe("connecting");
