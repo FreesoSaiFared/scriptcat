@@ -3,6 +3,7 @@ import Sidebar from "./layout/Sidebar";
 import ScriptList from "./routes/ScriptList";
 import SubscribeList from "./routes/SubscribeList";
 import ScriptEditor from "./routes/ScriptEditor";
+import EventRules from "./routes/EventRules";
 import Logger from "./routes/Logger";
 import Setting from "./routes/Setting";
 import Tools from "./routes/Tools";
@@ -85,6 +86,7 @@ export default function App() {
             <Route path="logs" element={<Logger />} />
             <Route path="logger" element={<Navigate to="/logs" replace />} />
             <Route path="tools" element={<Tools />} />
+            <Route path="events" element={<EventRules />} />
             <Route path="settings" element={<Setting />} />
             <Route path="setting" element={<Navigate to="/settings" replace />} />
             <Route path="script/editor/:uuid?" element={<ScriptEditor />} />
