@@ -99,6 +99,9 @@ export function defaultEventRulesConfig(): EventRulesConfig {
   };
 }
 
+const finiteNumber = (value: unknown, fallback: number): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
 export function normalizeEventRulesConfig(value: unknown): EventRulesConfig {
   if (!value || typeof value !== "object") return defaultEventRulesConfig();
   const candidate = value as Partial<EventRulesConfig>;
@@ -117,9 +120,9 @@ export function normalizeEventRulesConfig(value: unknown): EventRulesConfig {
         actionSummary: String(r.actionSummary || ""),
         detectorCode: String(r.detectorCode || "function detect() { return { matched: false }; }"),
         actionCode: String(r.actionCode || "async function act() {}"),
-        debounceMs: Number.isFinite(r.debounceMs) ? Number(r.debounceMs) : 250,
-        cooldownMs: Number.isFinite(r.cooldownMs) ? Number(r.cooldownMs) : 5_000,
-        backoffMs: Number.isFinite(r.backoffMs) ? Number(r.backoffMs) : 0,
+        debounceMs: finiteNumber(r.debounceMs, 250),
+        cooldownMs: finiteNumber(r.cooldownMs, 5_000),
+        backoffMs: finiteNumber(r.backoffMs, 0),
       };
     }),
   };
