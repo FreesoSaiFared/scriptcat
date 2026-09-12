@@ -5,6 +5,7 @@ import {
   ScrollText,
   Wrench,
   Settings,
+  Siren,
   MessageSquare,
   Server,
   Sparkles,
@@ -43,5 +44,6 @@ export const agentNav: NavItem[] = [
 export const auxNav: NavItem[] = [
   { to: "/logs", icon: ScrollText, label: () => t("logs") },
   { to: "/tools", icon: Wrench, label: () => t("tools") },
+  { to: "/events", icon: Siren, label: () => "Event rules" },
   { to: "/settings", icon: Settings, label: () => t("settings") },
 ];
