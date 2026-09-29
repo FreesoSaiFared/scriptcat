@@ -29,12 +29,24 @@ jobs:
           echo "0666d9dc40d60fe5b9a45f3fc24f8e6ca87112974bd5de9ca57152aa13d06017  runtime/${GLTFPACK_FILE}" | sha256sum -c -
 
           cat > repos.tsv <<'EOF'
+          MuSkeMo	https://github.com/PashavanBijlert/MuSkeMo.git
           BlendOsim	https://github.com/JonathanCamargo/BlendOsim.git
           opensim-core	https://github.com/opensim-org/opensim-core.git
+          SMPL-X	https://github.com/vchoutas/smplx.git
+          VPoser-human_body_prior	https://github.com/nghorbani/human_body_prior.git
+          EasyMocap	https://github.com/zju3dv/EasyMocap.git
           mmpose	https://github.com/open-mmlab/mmpose.git
           skellytracker	https://github.com/freemocap/skellytracker.git
+          motion-diffusion-model	https://github.com/GuyTevet/motion-diffusion-model.git
           stable-diffusion.cpp	https://github.com/leejet/stable-diffusion.cpp.git
           meshoptimizer	https://github.com/zeux/meshoptimizer.git
+          EOF
+
+          cat > manifest/source-policy.txt <<'EOF'
+          DANCERS_SOURCE_POLICY/1
+          license_filtering=false
+          bundle_all_selected_sources=true
+          rationale=user explicitly authorized use of all selected licenses for this project
           EOF
 
           : > manifest/sources.tsv
@@ -48,16 +60,9 @@ jobs:
             printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$sha" "$digest" "$bytes" "$url" >> manifest/sources.tsv
           done < repos.tsv
 
-          cat > manifest/optional-restricted-sources.tsv <<'EOF'
-          MuSkeMo	https://github.com/PashavanBijlert/MuSkeMo.git	license-not-declared-in-repository-metadata; inspect before redistribution
-          SMPL-X	https://github.com/vchoutas/smplx.git	non-commercial research/artistic license; do not bundle
-          VPoser-human_body_prior	https://github.com/nghorbani/human_body_prior.git	non-commercial research/artistic license; do not bundle
-          EasyMocap	https://github.com/zju3dv/EasyMocap.git	project registration license; do not bundle by default
-          EOF
-
           (find runtime -type f -print0; find sources -type f -print0; find manifest -type f -print0) | sort -z | xargs -0 sha256sum > manifest/all-files.sha256
           tar -czf dancers-runtime-binaries.tar.gz runtime manifest/blender.sha256
-          tar -czf dancers-runtime-sources.tar.gz sources manifest/sources.tsv manifest/optional-restricted-sources.tsv manifest/all-files.sha256
+          tar -czf dancers-runtime-sources.tar.gz sources manifest/sources.tsv manifest/source-policy.txt manifest/all-files.sha256
           sha256sum dancers-runtime-binaries.tar.gz dancers-runtime-sources.tar.gz > manifest/packages.sha256
           cp manifest/packages.sha256 .
           ls -lh dancers-runtime-*.tar.gz
