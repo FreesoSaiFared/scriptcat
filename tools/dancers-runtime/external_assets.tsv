@@ -1,0 +1,4 @@
+asset	purpose	upstream	status
+SMPL-X body models	parametric dancer body/pose model	https://smpl-x.is.tue.mpg.de/download.php	registration-required; not present in Git source snapshot
+VPoser checkpoints	learned human pose plausibility prior	https://smpl-x.is.tue.mpg.de/download.php	registration-required; not present in human_body_prior Git source snapshot
+AMASS motion archive	real human motion corpus for priors/reference	https://amass.is.tue.mpg.de/download.php	registration-required; optional large dataset
