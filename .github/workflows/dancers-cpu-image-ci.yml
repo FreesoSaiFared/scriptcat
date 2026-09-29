@@ -1,0 +1,160 @@
+name: dancers-cpu-image-ci
+on:
+  push:
+    branches:
+      - chatgpt/dancers-runtime-mailbox-20260929
+    paths:
+      - .github/workflows/dancers-cpu-image-ci.yml
+  workflow_dispatch:
+
+jobs:
+  cpu-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Run consolidated CPU image-generation benchmark
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p runtime models out
+          exec > >(tee out/benchmark.log) 2>&1
+
+          echo '== host =='
+          uname -a
+          lscpu
+          free -h
+
+          echo '== acquire pinned stable-diffusion.cpp =='
+          SD_TAG=master-929-3f8527a
+          SD_FILE=sd-master-3f8527a-bin-Linux-Ubuntu-24.04-x86_64.zip
+          curl -fL --retry 5 --retry-delay 3 -o runtime/sd.zip \
+            "https://github.com/leejet/stable-diffusion.cpp/releases/download/${SD_TAG}/${SD_FILE}"
+          echo '9ad35ed309dbe59f5e66f35edafac9a69e6cc233ea6b9577071feae829159d37  runtime/sd.zip' | sha256sum -c -
+          unzip -q runtime/sd.zip -d runtime/sd
+          SD_BIN=$(find runtime/sd -type f -perm -111 -name 'sd-cli' -print -quit)
+          test -n "$SD_BIN"
+          "$SD_BIN" --help > out/sd-help.txt 2>&1 || true
+
+          echo '== acquire CPU-friendly SD1.5 model stack =='
+          BASE=models/v1-5-pruned-emaonly.q4_0.gguf
+          CONTROL=models/control_v11p_sd15_openpose.safetensors
+          LORA=models/lcm-lora-sdv1-5.safetensors
+          curl -fL --retry 5 --retry-delay 5 -o "$BASE" \
+            'https://huggingface.co/genai-archive/stable-diffusion-v1-5-gguf/resolve/main/v1-5-pruned-emaonly.q4_0.gguf?download=true'
+          curl -fL --retry 5 --retry-delay 5 -o "$CONTROL" \
+            'https://huggingface.co/OreX/ControlNet/resolve/main/control_v11p_sd15_openpose.safetensors?download=true'
+          curl -fL --retry 5 --retry-delay 5 -o "$LORA" \
+            'https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors?download=true'
+          echo '4003c1da17b0e4ba444e02140e1c0d83bb24b79e4dcfd613c3a554d38f0f89c7  models/control_v11p_sd15_openpose.safetensors' | sha256sum -c -
+          sha256sum "$BASE" "$LORA" > out/model-sha256.txt
+          du -h "$BASE" "$CONTROL" "$LORA"
+
+          echo '== synthesize deterministic five-dancer pose control image =='
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image, ImageDraw
+          W=384; H=384
+          im=Image.new('RGB',(W,H),(0,0,0)); d=ImageDraw.Draw(im)
+          colors=[(255,0,0),(255,160,0),(255,255,0),(0,255,0),(0,160,255)]
+          xs=[70,130,192,254,314]
+          ys=[170,155,145,155,170]
+          # COCO/OpenPose-like stick figures: head, shoulders, hips, arms, legs.
+          for x,y,c in zip(xs,ys,colors):
+              d.ellipse((x-9,y-75,x+9,y-57),outline=c,width=4)
+              neck=(x,y-54); hip=(x,y+4)
+              ls=(x-12,y-44); rs=(x+12,y-44); lh=(x-11,y+5); rh=(x+11,y+5)
+              le=(x-24,y-22); re=(x+24,y-22); lw=(x-33,y+2); rw=(x+33,y+2)
+              lk=(x-10,y+46); rk=(x+12,y+45); la=(x-20,y+83); ra=(x+22,y+82)
+              seg=[(neck,hip),(ls,rs),(ls,le),(le,lw),(rs,re),(re,rw),(lh,rh),(lh,lk),(lk,la),(rh,rk),(rk,ra)]
+              for a,b in seg: d.line((a,b),fill=c,width=5)
+              for p in [neck,ls,rs,le,re,lw,rw,lh,rh,lk,rk,la,ra]: d.ellipse((p[0]-3,p[1]-3,p[0]+3,p[1]+3),fill=c)
+          im.save('out/five-dancer-pose.png')
+          PY
+
+          PROMPT='five adult female dancers, synchronized pop choreography, full body, coordinated white and pale-pink stage outfits, cyan and magenta club lighting, fashion performance photography, energetic movement, clear limbs, coherent anatomy'
+          NEG='child, minor, extra limbs, fused bodies, malformed hands, cropped feet, text, watermark'
+          THREADS=$(nproc)
+
+          run_case() {
+            local label="$1"; shift
+            local start end rc
+            start=$(date +%s.%N)
+            set +e
+            /usr/bin/time -v "$SD_BIN" \
+              -m "$BASE" \
+              -p "${PROMPT}<lora:lcm-lora-sdv1-5:1>" \
+              -n "$NEG" \
+              --lora-model-dir models \
+              --steps 4 \
+              --cfg-scale 1 \
+              --sampling-method lcm \
+              --backend cpu \
+              --threads "$THREADS" \
+              --diffusion-fa \
+              -W 384 -H 384 \
+              --seed 424242 \
+              -o "out/${label}.png" \
+              "$@" > "out/${label}.stdout.txt" 2> "out/${label}.time.txt"
+            rc=$?
+            set -e
+            end=$(date +%s.%N)
+            python3 - "$label" "$start" "$end" "$rc" <<'PY'
+          import json,sys
+          label,start,end,rc=sys.argv[1],float(sys.argv[2]),float(sys.argv[3]),int(sys.argv[4])
+          json.dump({'label':label,'elapsed_s':round(end-start,3),'exit_code':rc},open(f'out/{label}.run.json','w'),indent=2)
+          PY
+            return 0
+          }
+
+          echo '== benchmark plain LCM =='
+          run_case plain_lcm
+
+          echo '== benchmark ControlNet/OpenPose LCM =='
+          run_case controlnet_lcm \
+            --control-net "$CONTROL" \
+            --control-image out/five-dancer-pose.png \
+            --control-strength 0.85
+
+          echo '== receipt =='
+          python3 - <<'PY'
+          import json, pathlib, hashlib, os, platform, re
+          out=pathlib.Path('out')
+          def sha(p):
+              h=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
+              return h.hexdigest()
+          cases={}
+          for label in ('plain_lcm','controlnet_lcm'):
+              run=json.load(open(out/f'{label}.run.json'))
+              img=out/f'{label}.png'
+              run['image_created']=img.exists() and img.stat().st_size>1000
+              run['image_bytes']=img.stat().st_size if img.exists() else 0
+              run['image_sha256']=sha(img) if img.exists() else None
+              t=(out/f'{label}.time.txt').read_text(errors='replace') if (out/f'{label}.time.txt').exists() else ''
+              m=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',t)
+              run['max_rss_kb']=int(m.group(1)) if m else None
+              cases[label]=run
+          rec={
+              'schema':'DANCERS_CPU_IMAGE_ACCEPTANCE/1',
+              'host':{'platform':platform.platform(),'machine':platform.machine(),'cpu_count':os.cpu_count()},
+              'model':{'base':'SD1.5 q4_0 GGUF','controlnet':'OpenPose SD1.5','acceleration':'LCM-LoRA','steps':4,'resolution':[384,384]},
+              'cases':cases,
+          }
+          rec['acceptance']={
+              'plain_ok':cases['plain_lcm']['exit_code']==0 and cases['plain_lcm']['image_created'],
+              'controlnet_ok':cases['controlnet_lcm']['exit_code']==0 and cases['controlnet_lcm']['image_created'],
+          }
+          rec['acceptance']['pass_core']=rec['acceptance']['plain_ok']
+          json.dump(rec,open(out/'CPU_IMAGE_RECEIPT.json','w'),indent=2)
+          print(json.dumps(rec,indent=2))
+          PY
+          sha256sum out/* > out/sha256sums.txt || true
+
+      - name: Upload CPU image benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-cpu-image-benchmark
+          path: out/
+          retention-days: 7
