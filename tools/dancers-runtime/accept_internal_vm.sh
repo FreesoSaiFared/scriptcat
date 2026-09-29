@@ -3,50 +3,88 @@ set -Eeuo pipefail
 
 BIN_ZIP="${BIN_ZIP:-/mnt/data/dancers-runtime-binaries.zip}"
 SRC_ZIP="${SRC_ZIP:-/mnt/data/dancers-runtime-sources.zip}"
+QUARRY_ZIP="${QUARRY_ZIP:-/mnt/data/dancers-source-quarry.zip}"
 ROOT="${DANCERS_ROOT:-/mnt/data/dancers-runtime}"
 TOOLS_DIR="${DANCERS_TOOLS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 INCOMING="$ROOT/incoming"
 PAYLOAD="$ROOT/payload"
 OUT="$ROOT/out"
-mkdir -p "$INCOMING/bin" "$INCOMING/src" "$PAYLOAD" "$OUT"
+mkdir -p "$INCOMING/bin" "$INCOMING/src" "$INCOMING/quarry" "$PAYLOAD" "$OUT"
 
 log(){ printf '[dancers-runtime] %s\n' "$*" >&2; }
 die(){ log "FATAL: $*"; exit 1; }
 trap 'rc=$?; log "failed rc=$rc line=$LINENO"; exit $rc' ERR
 
-for f in "$BIN_ZIP" "$SRC_ZIP" "$TOOLS_DIR/danceseq.py" "$TOOLS_DIR/compile_plan.py" "$TOOLS_DIR/blender_compile_state.py"; do
+for f in "$BIN_ZIP" "$TOOLS_DIR/danceseq.py" "$TOOLS_DIR/compile_plan.py" "$TOOLS_DIR/blender_compile_state.py"; do
   [[ -f "$f" ]] || die "missing $f"
 done
+[[ -f "$SRC_ZIP" || -f "$QUARRY_ZIP" ]] || die "need at least one source capsule: $SRC_ZIP or $QUARRY_ZIP"
 for cmd in python3 tar sha256sum; do command -v "$cmd" >/dev/null || die "$cmd is required"; done
 
 BIN_SHA=$(sha256sum "$BIN_ZIP" | awk '{print $1}')
-SRC_SHA=$(sha256sum "$SRC_ZIP" | awk '{print $1}')
+SRC_SHA=none
+QUARRY_SHA=none
+[[ -f "$SRC_ZIP" ]] && SRC_SHA=$(sha256sum "$SRC_ZIP" | awk '{print $1}')
+[[ -f "$QUARRY_ZIP" ]] && QUARRY_SHA=$(sha256sum "$QUARRY_ZIP" | awk '{print $1}')
 TOOLS_SHA=$(sha256sum "$TOOLS_DIR/danceseq.py" "$TOOLS_DIR/compile_plan.py" "$TOOLS_DIR/blender_compile_state.py" | sha256sum | awk '{print $1}')
-STAMP="$BIN_SHA $SRC_SHA"
+STAMP="$BIN_SHA $SRC_SHA $QUARRY_SHA"
 
 if [[ ! -f "$ROOT/.payload-stamp" || "$(cat "$ROOT/.payload-stamp")" != "$STAMP" ]]; then
   log "extracting staged mailbox artifacts"
-  rm -rf "$INCOMING/bin" "$INCOMING/src" "$PAYLOAD"
-  mkdir -p "$INCOMING/bin" "$INCOMING/src" "$PAYLOAD"
-  python3 - "$BIN_ZIP" "$INCOMING/bin" "$SRC_ZIP" "$INCOMING/src" <<'PY'
+  rm -rf "$INCOMING/bin" "$INCOMING/src" "$INCOMING/quarry" "$PAYLOAD"
+  mkdir -p "$INCOMING/bin" "$INCOMING/src" "$INCOMING/quarry" "$PAYLOAD"
+
+  python3 - "$BIN_ZIP" "$INCOMING/bin" <<'PY'
 import sys, zipfile
-for src,dst in ((sys.argv[1],sys.argv[2]),(sys.argv[3],sys.argv[4])):
-    with zipfile.ZipFile(src) as z:
-        z.extractall(dst)
+with zipfile.ZipFile(sys.argv[1]) as z:
+    z.extractall(sys.argv[2])
 PY
   BIN_TAR=$(find "$INCOMING/bin" -type f -name 'dancers-runtime-binaries.tar.gz' -print -quit)
-  SRC_TAR=$(find "$INCOMING/src" -type f -name 'dancers-runtime-sources.tar.gz' -print -quit)
-  [[ -n "$BIN_TAR" && -n "$SRC_TAR" ]] || die "mailbox tar payload missing"
-  for T in "$BIN_TAR" "$SRC_TAR"; do
-    P=$(dirname "$T")/packages.sha256
-    [[ -f "$P" ]] || die "packages.sha256 missing beside $T"
-    WANT=$(grep "  $(basename "$T")$" "$P" | awk '{print $1}' | head -n1)
-    [[ -n "$WANT" ]] || die "no expected hash for $(basename "$T")"
-    GOT=$(sha256sum "$T" | awk '{print $1}')
-    [[ "$GOT" == "$WANT" ]] || die "package hash mismatch: $(basename "$T")"
-  done
+  [[ -n "$BIN_TAR" ]] || die "runtime binaries tar payload missing"
+  P=$(dirname "$BIN_TAR")/packages.sha256
+  [[ -f "$P" ]] || die "packages.sha256 missing beside runtime binaries tar"
+  WANT=$(grep "  $(basename "$BIN_TAR")$" "$P" | awk '{print $1}' | head -n1)
+  GOT=$(sha256sum "$BIN_TAR" | awk '{print $1}')
+  [[ -n "$WANT" && "$GOT" == "$WANT" ]] || die "runtime package hash mismatch"
   tar -xzf "$BIN_TAR" -C "$PAYLOAD"
-  tar -xzf "$SRC_TAR" -C "$PAYLOAD"
+
+  if [[ -f "$SRC_ZIP" ]]; then
+    python3 - "$SRC_ZIP" "$INCOMING/src" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    z.extractall(sys.argv[2])
+PY
+    SRC_TAR=$(find "$INCOMING/src" -type f -name 'dancers-runtime-sources.tar.gz' -print -quit)
+    [[ -n "$SRC_TAR" ]] || die "legacy source tar payload missing"
+    P=$(dirname "$SRC_TAR")/packages.sha256
+    [[ -f "$P" ]] || die "packages.sha256 missing beside legacy source tar"
+    WANT=$(grep "  $(basename "$SRC_TAR")$" "$P" | awk '{print $1}' | head -n1)
+    GOT=$(sha256sum "$SRC_TAR" | awk '{print $1}')
+    [[ -n "$WANT" && "$GOT" == "$WANT" ]] || die "legacy source package hash mismatch"
+    tar -xzf "$SRC_TAR" -C "$PAYLOAD"
+  fi
+
+  if [[ -f "$QUARRY_ZIP" ]]; then
+    log "ingesting unfiltered source quarry"
+    python3 - "$QUARRY_ZIP" "$INCOMING/quarry" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    z.extractall(sys.argv[2])
+PY
+    QUARRY_TAR=$(find "$INCOMING/quarry" -type f -name 'dancers-source-quarry.tar.gz' -print -quit)
+    [[ -n "$QUARRY_TAR" ]] || die "source quarry tar payload missing"
+    QS=$(find "$INCOMING/quarry" -type f -name 'dancers-source-quarry.tar.gz.sha256' -print -quit)
+    [[ -n "$QS" ]] || die "source quarry checksum missing"
+    (cd "$(dirname "$QUARRY_TAR")" && sha256sum -c "$(basename "$QS")")
+    mkdir -p "$PAYLOAD/quarry"
+    tar -xzf "$QUARRY_TAR" -C "$PAYLOAD/quarry"
+    if [[ -f "$PAYLOAD/quarry/manifest/source-files.sha256" ]]; then
+      (cd "$PAYLOAD/quarry" && sha256sum -c manifest/source-files.sha256)
+    fi
+    [[ -f "$PAYLOAD/quarry/manifest/source-policy.txt" ]] || die "source quarry policy receipt missing"
+    grep -q '^license_filtering=false$' "$PAYLOAD/quarry/manifest/source-policy.txt" || die "unexpected source quarry policy"
+  fi
+
   if [[ -f "$PAYLOAD/manifest/all-files.sha256" ]]; then
     (cd "$PAYLOAD" && grep -v ' manifest/all-files.sha256$' manifest/all-files.sha256 | sha256sum -c -)
   fi
@@ -102,7 +140,7 @@ lscpu > "$OUT/lscpu.txt"
 cat /proc/meminfo > "$OUT/meminfo.txt"
 uname -a > "$OUT/uname.txt"
 
-python3 - "$OUT" "$BIN_SHA" "$SRC_SHA" "$TOOLS_SHA" <<'PY'
+python3 - "$OUT" "$BIN_SHA" "$SRC_SHA" "$QUARRY_SHA" "$TOOLS_SHA" <<'PY'
 import sys,json,hashlib,os,platform,pathlib
 out=pathlib.Path(sys.argv[1])
 blender=json.loads((out/'blender-receipt.json').read_text())
@@ -129,9 +167,10 @@ acc={
 acc['render_matrix_complete']=all(acc[k] for k in ('workbench_ok','eevee_ok','cycles_cpu_ok'))
 acc['pass_core']=all(acc[k] for k in ('danceseq_parsed','state_compiled','state_consumed_by_blender','blend_created','raw_glb_created','packed_glb_created','cycles_cpu_ok'))
 receipt={
- 'schema':'DANCERS_RUNTIME_ACCEPTANCE/2',
+ 'schema':'DANCERS_RUNTIME_ACCEPTANCE/3',
  'host':{'platform':platform.platform(),'machine':platform.machine(),'cpu_count':os.cpu_count()},
- 'mailbox':{'binaries_zip_sha256':sys.argv[2],'sources_zip_sha256':sys.argv[3],'tools_sha256':sys.argv[4]},
+ 'mailbox':{'binaries_zip_sha256':sys.argv[2],'legacy_sources_zip_sha256':sys.argv[3],'unfiltered_quarry_zip_sha256':sys.argv[4],'tools_sha256':sys.argv[5]},
+ 'source_policy':{'license_filtering':False,'bundle_all_selected_sources':True,'quarry_present':sys.argv[4] != 'none'},
  'semantic':{'event_count':plan['stats']['event_count'],'state_frames':len(state['frames']),'diagnostics':state['diagnostics']},
  'blender':blender,
  'sd_probe':{'binary':(out/'sd-binary.txt').read_text(errors='replace').strip(),'help_captured':(out/'sd-help.txt').exists(),'model_downloaded':False},
