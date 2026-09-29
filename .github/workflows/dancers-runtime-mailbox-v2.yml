@@ -1,8 +1,5 @@
 name: dancers-runtime-mailbox-v2
 on:
-  push:
-    branches:
-      - chatgpt/dancers-runtime-mailbox-20260929
   workflow_dispatch:
 
 jobs:
