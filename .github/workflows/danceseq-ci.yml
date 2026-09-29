@@ -1,0 +1,54 @@
+name: danceseq-ci
+on:
+  push:
+    branches:
+      - chatgpt/dancers-runtime-mailbox-20260929
+    paths:
+      - tools/dancers-runtime/danceseq.py
+      - tools/dancers-runtime/test_danceseq.py
+      - .github/workflows/danceseq-ci.yml
+  workflow_dispatch:
+
+jobs:
+  grammar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+      - name: Compile parser
+        run: python3 -m py_compile tools/dancers-runtime/danceseq.py
+      - name: Run deterministic grammar tests
+        run: python3 tools/dancers-runtime/test_danceseq.py
+      - name: Round-trip canonical specimen
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/spec.danceseq <<'EOF'
+          DANCESEQ/1
+          bpm 124
+          fps 24
+          duration_frames 96
+          FORM V_SHALLOW
+          F001 ALL pose neutral
+          F024 D1,D5 step inward 0.31m
+          F024 D3 pelvis.z -0.19m
+          F048 ALL pelvis.yaw -18deg
+          F048 ALL chest.look camera
+          F072 ALL root.z +0.17m
+          F072 ALL root.y -0.24m
+          F096 ALL pose loop_ready
+          CONTACT preserve_support
+          EOF
+          python3 tools/dancers-runtime/danceseq.py /tmp/spec.danceseq -o /tmp/plan-a.json
+          python3 tools/dancers-runtime/danceseq.py /tmp/spec.danceseq -o /tmp/plan-b.json
+          cmp /tmp/plan-a.json /tmp/plan-b.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/plan-a.json'))
+          assert p['schema']=='DANCESEQ/1'
+          assert p['stats']['event_count']==8
+          assert p['events'][0]['frame']==1
+          assert p['events'][-1]['frame']==96
+          print(json.dumps(p['stats'],sort_keys=True))
+          PY
