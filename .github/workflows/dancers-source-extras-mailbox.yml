@@ -1,0 +1,86 @@
+name: dancers-source-extras-mailbox
+on:
+  push:
+    branches:
+      - chatgpt/dancers-runtime-mailbox-20260929
+    paths:
+      - .github/workflows/dancers-source-extras-mailbox.yml
+  workflow_dispatch:
+
+jobs:
+  quarry-extras:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Acquire and split visual/runtime source extras in one script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p sources manifest chunks
+
+          # Blender is pinned to exactly the source commit reported by the portable 4.5.14 binary.
+          cat > repos.tsv <<'EOF'
+          blender-4.5.14	https://github.com/blender/blender.git	62c1db4208e862312bc36db5bc15d4a6dbcfa3e3
+          MB-Lab	https://github.com/animate1978/MB-Lab.git	HEAD
+          makehuman-blender	https://github.com/makehumancommunity/makehuman-plugin-for-blender.git	HEAD
+          OpenPose	https://github.com/CMU-Perceptual-Computing-Lab/openpose.git	HEAD
+          ControlNet	https://github.com/lllyasviel/ControlNet.git	HEAD
+          latent-consistency-model	https://github.com/luosiallen/latent-consistency-model.git	HEAD
+          DWPose	https://github.com/IDEA-Research/DWPose.git	HEAD
+          EOF
+
+          : > manifest/sources.tsv
+          while IFS=$'\t' read -r name url requested; do
+            base=${url#https://github.com/}; base=${base%.git}
+            if [[ "$requested" == HEAD ]]; then
+              sha=$(git ls-remote "$url" HEAD | awk '{print $1}')
+            else
+              sha="$requested"
+              git ls-remote "$url" | grep -qi "$sha" || {
+                # A commit may not be advertised directly by ls-remote; verify archive endpoint instead.
+                true
+              }
+            fi
+            test -n "$sha"
+            out="sources/${name}-${sha}.tar.gz"
+            curl -fL --retry 5 --retry-delay 3 -o "$out" "https://github.com/${base}/archive/${sha}.tar.gz"
+            digest=$(sha256sum "$out" | awk '{print $1}')
+            bytes=$(stat -c%s "$out")
+            printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$sha" "$digest" "$bytes" "$url" >> manifest/sources.tsv
+          done < repos.tsv
+
+          cat > manifest/source-policy.txt <<'EOF'
+          DANCERS_SOURCE_EXTRAS/1
+          license_filtering=false
+          blender_version=4.5.14
+          blender_commit=62c1db4208e862312bc36db5bc15d4a6dbcfa3e3
+          purpose=Blender source + native character donors + pose/control/image-generation donors
+          transport=350MiB_chunks
+          EOF
+          find sources -type f -print0 | sort -z | xargs -0 sha256sum > manifest/source-files.sha256
+          tar -czf dancers-source-extras.tar.gz sources manifest
+          sha256sum dancers-source-extras.tar.gz > manifest/extras.sha256
+          split -b 350M -d -a 2 dancers-source-extras.tar.gz chunks/extras.part-
+          sha256sum chunks/* > manifest/chunks.sha256
+          stat -c '%n\t%s' chunks/* > manifest/chunks.bytes.tsv
+          printf 'repos=%s\n' "$(wc -l < manifest/sources.tsv)"
+          du -h dancers-source-extras.tar.gz chunks/*
+
+      - name: Upload extras chunk 00
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-source-extras-00, path: chunks/extras.part-00, compression-level: 0, retention-days: 7}
+      - name: Upload extras chunk 01 if present
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-source-extras-01, path: chunks/extras.part-01, compression-level: 0, retention-days: 7, if-no-files-found: ignore}
+      - name: Upload extras chunk 02 if present
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-source-extras-02, path: chunks/extras.part-02, compression-level: 0, retention-days: 7, if-no-files-found: ignore}
+      - name: Upload extras manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-source-extras-manifest
+          path: manifest/
+          retention-days: 7
