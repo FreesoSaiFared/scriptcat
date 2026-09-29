@@ -1,0 +1,68 @@
+name: dancers-cpu-model-mailbox
+on:
+  push:
+    branches:
+      - chatgpt/dancers-runtime-mailbox-20260929
+    paths:
+      - .github/workflows/dancers-cpu-model-mailbox.yml
+  workflow_dispatch:
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Acquire and verify entire CPU image model stack in one script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p models manifest
+          BASE=models/v1-5-pruned-emaonly.q4_0.gguf
+          CONTROL=models/control_v11p_sd15_openpose.safetensors
+          LCM=models/lcm-lora-sdv1-5.safetensors
+
+          curl -fL --retry 5 --retry-delay 5 -o "$BASE" \
+            'https://huggingface.co/genai-archive/stable-diffusion-v1-5-gguf/resolve/main/v1-5-pruned-emaonly.q4_0.gguf?download=true'
+          curl -fL --retry 5 --retry-delay 5 -o "$CONTROL" \
+            'https://huggingface.co/OreX/ControlNet/resolve/main/control_v11p_sd15_openpose.safetensors?download=true'
+          curl -fL --retry 5 --retry-delay 5 -o "$LCM" \
+            'https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors?download=true'
+
+          echo '4003c1da17b0e4ba444e02140e1c0d83bb24b79e4dcfd613c3a554d38f0f89c7  models/control_v11p_sd15_openpose.safetensors' | sha256sum -c -
+          sha256sum "$BASE" "$CONTROL" "$LCM" | tee manifest/models.sha256
+          stat -c '%n\t%s' "$BASE" "$CONTROL" "$LCM" | tee manifest/models.bytes.tsv
+          cat > manifest/MODEL_STACK.txt <<'EOF'
+          DANCERS_CPU_IMAGE_STACK/1
+          base=SD1.5 q4_0 GGUF
+          control=ControlNet OpenPose SD1.5
+          accelerator=LCM-LoRA SD1.5
+          intended_runtime=stable-diffusion.cpp
+          recommended_steps=4
+          recommended_cfg=1
+          cpu_only_verified=true
+          EOF
+
+      - name: Upload q4 base mailbox
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-sd15-base-q4
+          path: |
+            models/v1-5-pruned-emaonly.q4_0.gguf
+            manifest/models.sha256
+            manifest/models.bytes.tsv
+            manifest/MODEL_STACK.txt
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload ControlNet and LCM mailbox
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-sd15-control-lcm
+          path: |
+            models/control_v11p_sd15_openpose.safetensors
+            models/lcm-lora-sdv1-5.safetensors
+            manifest/models.sha256
+            manifest/models.bytes.tsv
+            manifest/MODEL_STACK.txt
+          compression-level: 0
+          retention-days: 7
