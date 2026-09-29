@@ -1,0 +1,97 @@
+name: dancers-cpu-model-chunks-mailbox
+on:
+  push:
+    branches:
+      - chatgpt/dancers-runtime-mailbox-20260929
+    paths:
+      - .github/workflows/dancers-cpu-model-chunks-mailbox.yml
+  workflow_dispatch:
+
+jobs:
+  chunk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Acquire, verify, and split all model payloads in one script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p models chunks manifest
+          BASE=models/v1-5-pruned-emaonly.q4_0.gguf
+          CONTROL=models/control_v11p_sd15_openpose.safetensors
+          LCM=models/lcm-lora-sdv1-5.safetensors
+          curl -fL --retry 5 --retry-delay 5 -o "$BASE" 'https://huggingface.co/genai-archive/stable-diffusion-v1-5-gguf/resolve/main/v1-5-pruned-emaonly.q4_0.gguf?download=true'
+          curl -fL --retry 5 --retry-delay 5 -o "$CONTROL" 'https://huggingface.co/OreX/ControlNet/resolve/main/control_v11p_sd15_openpose.safetensors?download=true'
+          curl -fL --retry 5 --retry-delay 5 -o "$LCM" 'https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors?download=true'
+          cat > manifest/models.sha256 <<'EOF'
+          0c59323f5a3e1ff1f76044966c11dcd5ea14e9000cad5999968172cf6d9cc84f  models/v1-5-pruned-emaonly.q4_0.gguf
+          4003c1da17b0e4ba444e02140e1c0d83bb24b79e4dcfd613c3a554d38f0f89c7  models/control_v11p_sd15_openpose.safetensors
+          8f90d840e075ff588a58e22c6586e2ae9a6f7922996ee6649a7f01072333afe4  models/lcm-lora-sdv1-5.safetensors
+          EOF
+          sha256sum -c manifest/models.sha256
+          split -b 350M -d -a 2 "$BASE" chunks/base.part-
+          split -b 350M -d -a 2 "$CONTROL" chunks/control.part-
+          split -b 350M -d -a 2 "$LCM" chunks/lcm.part-
+          sha256sum chunks/* > manifest/chunks.sha256
+          stat -c '%n\t%s' chunks/* > manifest/chunks.bytes.tsv
+          cat > manifest/reassemble.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          HERE="$(cd "$(dirname "$0")" && pwd)"
+          OUT="${1:-$HERE/../models}"
+          mkdir -p "$OUT"
+          (cd "$HERE/.." && sha256sum -c manifest/chunks.sha256)
+          cat "$HERE"/../chunks/base.part-* > "$OUT/v1-5-pruned-emaonly.q4_0.gguf"
+          cat "$HERE"/../chunks/control.part-* > "$OUT/control_v11p_sd15_openpose.safetensors"
+          cat "$HERE"/../chunks/lcm.part-* > "$OUT/lcm-lora-sdv1-5.safetensors"
+          (cd "$HERE/.." && sed 's#models/#'"$OUT"'/#' manifest/models.sha256 | sha256sum -c -)
+          EOF
+          chmod +x manifest/reassemble.sh
+          cat > manifest/README.txt <<'EOF'
+          DANCERS_CPU_IMAGE_CHUNKS/1
+          chunk_size=350MiB
+          base_sha256=0c59323f5a3e1ff1f76044966c11dcd5ea14e9000cad5999968172cf6d9cc84f
+          control_sha256=4003c1da17b0e4ba444e02140e1c0d83bb24b79e4dcfd613c3a554d38f0f89c7
+          lcm_sha256=8f90d840e075ff588a58e22c6586e2ae9a6f7922996ee6649a7f01072333afe4
+          EOF
+          ls -lh chunks
+
+      - name: Upload base chunk 00
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-base-00, path: chunks/base.part-00, compression-level: 0, retention-days: 7}
+      - name: Upload base chunk 01
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-base-01, path: chunks/base.part-01, compression-level: 0, retention-days: 7}
+      - name: Upload base chunk 02
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-base-02, path: chunks/base.part-02, compression-level: 0, retention-days: 7}
+      - name: Upload base chunk 03
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-base-03, path: chunks/base.part-03, compression-level: 0, retention-days: 7}
+      - name: Upload base chunk 04
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-base-04, path: chunks/base.part-04, compression-level: 0, retention-days: 7}
+      - name: Upload base chunk 05
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-base-05, path: chunks/base.part-05, compression-level: 0, retention-days: 7}
+      - name: Upload base chunk 06
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-base-06, path: chunks/base.part-06, compression-level: 0, retention-days: 7}
+      - name: Upload base chunk 07
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-base-07, path: chunks/base.part-07, compression-level: 0, retention-days: 7}
+      - name: Upload control chunk 00
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-control-00, path: chunks/control.part-00, compression-level: 0, retention-days: 7}
+      - name: Upload control chunk 01
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-control-01, path: chunks/control.part-01, compression-level: 0, retention-days: 7}
+      - name: Upload LCM chunk
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-model-lcm-00, path: chunks/lcm.part-00, compression-level: 0, retention-days: 7}
+      - name: Upload model manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-model-manifest
+          path: manifest/
+          retention-days: 7
