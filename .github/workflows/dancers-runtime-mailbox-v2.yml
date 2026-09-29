@@ -1,0 +1,86 @@
+name: dancers-runtime-mailbox-v2
+on:
+  push:
+    branches:
+      - chatgpt/dancers-runtime-mailbox-20260929
+  workflow_dispatch:
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Acquire and split portable dancers runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime sources manifest
+
+          BLENDER_VER=4.5.14
+          BLENDER_FILE="blender-${BLENDER_VER}-linux-x64.tar.xz"
+          curl -fL --retry 5 --retry-delay 2 -o "runtime/${BLENDER_FILE}" "https://download.blender.org/release/Blender4.5/${BLENDER_FILE}"
+          curl -fL --retry 5 --retry-delay 2 -o manifest/blender.sha256 "https://download.blender.org/release/Blender4.5/blender-${BLENDER_VER}.sha256"
+          grep "${BLENDER_FILE}" manifest/blender.sha256 | (cd runtime && sha256sum -c -)
+
+          SD_TAG=master-929-3f8527a
+          SD_FILE=sd-master-3f8527a-bin-Linux-Ubuntu-24.04-x86_64.zip
+          curl -fL --retry 5 --retry-delay 2 -o "runtime/${SD_FILE}" "https://github.com/leejet/stable-diffusion.cpp/releases/download/${SD_TAG}/${SD_FILE}"
+          echo "9ad35ed309dbe59f5e66f35edafac9a69e6cc233ea6b9577071feae829159d37  runtime/${SD_FILE}" | sha256sum -c -
+
+          GLTFPACK_FILE=gltfpack-ubuntu.zip
+          curl -fL --retry 5 --retry-delay 2 -o "runtime/${GLTFPACK_FILE}" "https://github.com/zeux/meshoptimizer/releases/download/v1.3/${GLTFPACK_FILE}"
+          echo "0666d9dc40d60fe5b9a45f3fc24f8e6ca87112974bd5de9ca57152aa13d06017  runtime/${GLTFPACK_FILE}" | sha256sum -c -
+
+          cat > repos.tsv <<'EOF'
+          BlendOsim	https://github.com/JonathanCamargo/BlendOsim.git
+          opensim-core	https://github.com/opensim-org/opensim-core.git
+          mmpose	https://github.com/open-mmlab/mmpose.git
+          skellytracker	https://github.com/freemocap/skellytracker.git
+          stable-diffusion.cpp	https://github.com/leejet/stable-diffusion.cpp.git
+          meshoptimizer	https://github.com/zeux/meshoptimizer.git
+          EOF
+
+          : > manifest/sources.tsv
+          while IFS=$'\t' read -r name url; do
+            sha=$(git ls-remote "$url" HEAD | awk '{print $1}')
+            base=${url#https://github.com/}; base=${base%.git}
+            out="sources/${name}-${sha}.tar.gz"
+            curl -fL --retry 5 --retry-delay 2 -o "$out" "https://github.com/${base}/archive/${sha}.tar.gz"
+            digest=$(sha256sum "$out" | awk '{print $1}')
+            bytes=$(stat -c%s "$out")
+            printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$sha" "$digest" "$bytes" "$url" >> manifest/sources.tsv
+          done < repos.tsv
+
+          cat > manifest/optional-restricted-sources.tsv <<'EOF'
+          MuSkeMo	https://github.com/PashavanBijlert/MuSkeMo.git	license-not-declared-in-repository-metadata; inspect before redistribution
+          SMPL-X	https://github.com/vchoutas/smplx.git	non-commercial research/artistic license; do not bundle
+          VPoser-human_body_prior	https://github.com/nghorbani/human_body_prior.git	non-commercial research/artistic license; do not bundle
+          EasyMocap	https://github.com/zju3dv/EasyMocap.git	project registration license; do not bundle by default
+          EOF
+
+          (find runtime -type f -print0; find sources -type f -print0; find manifest -type f -print0) | sort -z | xargs -0 sha256sum > manifest/all-files.sha256
+          tar -czf dancers-runtime-binaries.tar.gz runtime manifest/blender.sha256
+          tar -czf dancers-runtime-sources.tar.gz sources manifest/sources.tsv manifest/optional-restricted-sources.tsv manifest/all-files.sha256
+          sha256sum dancers-runtime-binaries.tar.gz dancers-runtime-sources.tar.gz > manifest/packages.sha256
+          cp manifest/packages.sha256 .
+          ls -lh dancers-runtime-*.tar.gz
+
+      - name: Upload runtime binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-runtime-binaries
+          path: |
+            dancers-runtime-binaries.tar.gz
+            packages.sha256
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload source quarry capsule
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-runtime-sources
+          path: |
+            dancers-runtime-sources.tar.gz
+            packages.sha256
+          compression-level: 0
+          retention-days: 7
