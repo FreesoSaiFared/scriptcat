@@ -5,7 +5,9 @@ on:
       - chatgpt/dancers-runtime-mailbox-20260929
     paths:
       - tools/dancers-runtime/danceseq.py
+      - tools/dancers-runtime/compile_plan.py
       - tools/dancers-runtime/test_danceseq.py
+      - tools/dancers-runtime/test_compile_plan.py
       - .github/workflows/danceseq-ci.yml
   workflow_dispatch:
 
@@ -16,10 +18,12 @@ jobs:
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
-      - name: Compile parser
-        run: python3 -m py_compile tools/dancers-runtime/danceseq.py
+      - name: Compile parser and state compiler
+        run: python3 -m py_compile tools/dancers-runtime/danceseq.py tools/dancers-runtime/compile_plan.py
       - name: Run deterministic grammar tests
         run: python3 tools/dancers-runtime/test_danceseq.py
+      - name: Run deterministic state compiler tests
+        run: python3 tools/dancers-runtime/test_compile_plan.py
       - name: Round-trip canonical specimen
         shell: bash
         run: |
@@ -43,12 +47,19 @@ jobs:
           python3 tools/dancers-runtime/danceseq.py /tmp/spec.danceseq -o /tmp/plan-a.json
           python3 tools/dancers-runtime/danceseq.py /tmp/spec.danceseq -o /tmp/plan-b.json
           cmp /tmp/plan-a.json /tmp/plan-b.json
+          python3 tools/dancers-runtime/compile_plan.py /tmp/spec.danceseq -o /tmp/state-a.json
+          python3 tools/dancers-runtime/compile_plan.py /tmp/spec.danceseq -o /tmp/state-b.json
+          cmp /tmp/state-a.json /tmp/state-b.json
           python3 - <<'PY'
           import json
           p=json.load(open('/tmp/plan-a.json'))
+          s=json.load(open('/tmp/state-a.json'))
           assert p['schema']=='DANCESEQ/1'
           assert p['stats']['event_count']==8
           assert p['events'][0]['frame']==1
           assert p['events'][-1]['frame']==96
-          print(json.dumps(p['stats'],sort_keys=True))
+          assert s['schema']=='DANCESTATE/1'
+          assert s['actor_count']==5
+          assert s['valid'] is True
+          print(json.dumps({'plan':p['stats'],'state_frames':len(s['frames']),'diagnostics':len(s['diagnostics'])},sort_keys=True))
           PY
