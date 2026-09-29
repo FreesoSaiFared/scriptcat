@@ -65,6 +65,8 @@ jobs:
           os.makedirs(OUT, exist_ok=True)
           bpy.ops.wm.read_factory_settings(use_empty=True)
           scene = bpy.context.scene
+          if scene.world is None:
+              scene.world = bpy.data.worlds.new('DancersWorld')
           scene.frame_start = 1
           scene.frame_end = 96
           scene.render.resolution_x = 512
@@ -221,6 +223,7 @@ jobs:
           else
             "$BLENDER" -b --python out/build_scene.py
           fi
+          test -s out/blender-receipt.json
 
       - name: Compress GLB and probe CPU diffusion binary
         shell: bash
@@ -258,7 +261,7 @@ jobs:
               return h.hexdigest()
           files={}
           for p in sorted(out.iterdir()):
-              if p.is_file() and p.name!='ACCEPTANCE_RECEIPT.json':
+              if p.is_file() and p.name not in {'ACCEPTANCE_RECEIPT.json','sha256sums.txt'}:
                   files[p.name]={'bytes':p.stat().st_size,'sha256':digest(p)}
           r['schema']='DANCERS_RUNTIME_ACCEPTANCE/1'
           r['host']={'platform':platform.platform(),'machine':platform.machine(),'processor':platform.processor(),'cpu_count':os.cpu_count()}
@@ -283,6 +286,7 @@ jobs:
           cat out/ACCEPTANCE_RECEIPT.json
 
       - name: Upload acceptance evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dancers-runtime-acceptance
