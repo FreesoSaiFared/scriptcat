@@ -15,7 +15,7 @@ log(){ printf '[dancers-runtime] %s\n' "$*" >&2; }
 die(){ log "FATAL: $*"; exit 1; }
 trap 'rc=$?; log "failed rc=$rc line=$LINENO"; exit $rc' ERR
 
-for f in "$BIN_ZIP" "$TOOLS_DIR/danceseq.py" "$TOOLS_DIR/compile_plan.py" "$TOOLS_DIR/blender_compile_state.py"; do
+for f in "$BIN_ZIP" "$TOOLS_DIR/danceseq.py" "$TOOLS_DIR/compile_plan.py" "$TOOLS_DIR/state_to_openpose.py" "$TOOLS_DIR/blender_compile_state.py"; do
   [[ -f "$f" ]] || die "missing $f"
 done
 [[ -f "$SRC_ZIP" || -f "$QUARRY_ZIP" ]] || die "need at least one source capsule: $SRC_ZIP or $QUARRY_ZIP"
@@ -26,7 +26,7 @@ SRC_SHA=none
 QUARRY_SHA=none
 [[ -f "$SRC_ZIP" ]] && SRC_SHA=$(sha256sum "$SRC_ZIP" | awk '{print $1}')
 [[ -f "$QUARRY_ZIP" ]] && QUARRY_SHA=$(sha256sum "$QUARRY_ZIP" | awk '{print $1}')
-TOOLS_SHA=$(sha256sum "$TOOLS_DIR/danceseq.py" "$TOOLS_DIR/compile_plan.py" "$TOOLS_DIR/blender_compile_state.py" | sha256sum | awk '{print $1}')
+TOOLS_SHA=$(sha256sum "$TOOLS_DIR/danceseq.py" "$TOOLS_DIR/compile_plan.py" "$TOOLS_DIR/state_to_openpose.py" "$TOOLS_DIR/blender_compile_state.py" | sha256sum | awk '{print $1}')
 STAMP="$BIN_SHA $SRC_SHA $QUARRY_SHA"
 
 if [[ ! -f "$ROOT/.payload-stamp" || "$(cat "$ROOT/.payload-stamp")" != "$STAMP" ]]; then
@@ -119,6 +119,9 @@ EOF
 log "compiling DANCESEQ -> DANCESTATE"
 python3 "$TOOLS_DIR/danceseq.py" "$OUT/five-dancer.danceseq" -o "$OUT/five-dancer.plan.json"
 python3 "$TOOLS_DIR/compile_plan.py" "$OUT/five-dancer.danceseq" -o "$OUT/five-dancer.state.json"
+log "rendering deterministic OpenPose-style ControlNet input"
+python3 "$TOOLS_DIR/state_to_openpose.py" "$OUT/five-dancer.state.json" -o "$OUT/control-openpose.png" --frame 48 --receipt "$OUT/control-openpose.json"
+[[ -s "$OUT/control-openpose.png" && -s "$OUT/control-openpose.json" ]] || die "OpenPose control render missing"
 
 "$BLENDER" --version > "$OUT/blender-version.txt"
 BLENDER_CMD=("$BLENDER" -b --python "$TOOLS_DIR/blender_compile_state.py" -- --state "$OUT/five-dancer.state.json" --out "$OUT" --preview-frame 48)
@@ -146,6 +149,7 @@ out=pathlib.Path(sys.argv[1])
 blender=json.loads((out/'blender-receipt.json').read_text())
 plan=json.loads((out/'five-dancer.plan.json').read_text())
 state=json.loads((out/'five-dancer.state.json').read_text())
+control=json.loads((out/'control-openpose.json').read_text())
 def sha(p):
  h=hashlib.sha256()
  with open(p,'rb') as f:
@@ -156,6 +160,7 @@ ok={x.get('label'):x.get('status')=='ok' for x in blender.get('renders',[])}
 acc={
  'danceseq_parsed':plan.get('schema')=='DANCESEQ/1',
  'state_compiled':state.get('schema')=='DANCESTATE/1' and state.get('valid') is True,
+ 'control_openpose_created':control.get('schema')=='DANCERS_OPENPOSE_CONTROL/1' and control.get('source_state_sha256')==sha(out/'five-dancer.state.json') and control.get('output_sha256')==sha(out/'control-openpose.png'),
  'state_consumed_by_blender':blender.get('schema')=='BLENDER_DANCESTATE_RECEIPT/1' and blender.get('source_state_sha256')==sha(out/'five-dancer.state.json'),
  'blend_created':(out/'five-dancer.blend').exists(),
  'raw_glb_created':(out/'five-dancer-raw.glb').exists(),
@@ -165,13 +170,14 @@ acc={
  'cycles_cpu_ok':ok.get('cycles_cpu',False),
 }
 acc['render_matrix_complete']=all(acc[k] for k in ('workbench_ok','eevee_ok','cycles_cpu_ok'))
-acc['pass_core']=all(acc[k] for k in ('danceseq_parsed','state_compiled','state_consumed_by_blender','blend_created','raw_glb_created','packed_glb_created','cycles_cpu_ok'))
+acc['pass_core']=all(acc[k] for k in ('danceseq_parsed','state_compiled','control_openpose_created','state_consumed_by_blender','blend_created','raw_glb_created','packed_glb_created','cycles_cpu_ok'))
 receipt={
- 'schema':'DANCERS_RUNTIME_ACCEPTANCE/3',
+ 'schema':'DANCERS_RUNTIME_ACCEPTANCE/4',
  'host':{'platform':platform.platform(),'machine':platform.machine(),'cpu_count':os.cpu_count()},
  'mailbox':{'binaries_zip_sha256':sys.argv[2],'legacy_sources_zip_sha256':sys.argv[3],'unfiltered_quarry_zip_sha256':sys.argv[4],'tools_sha256':sys.argv[5]},
  'source_policy':{'license_filtering':False,'bundle_all_selected_sources':True,'quarry_present':sys.argv[4] != 'none'},
  'semantic':{'event_count':plan['stats']['event_count'],'state_frames':len(state['frames']),'diagnostics':state['diagnostics']},
+ 'control_openpose':control,
  'blender':blender,
  'sd_probe':{'binary':(out/'sd-binary.txt').read_text(errors='replace').strip(),'help_captured':(out/'sd-help.txt').exists(),'model_downloaded':False},
  'artifacts':files,
