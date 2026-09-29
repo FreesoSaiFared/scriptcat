@@ -1,0 +1,66 @@
+name: dancers-source-quarry-mailbox
+on:
+  push:
+    branches:
+      - chatgpt/dancers-runtime-mailbox-20260929
+    paths:
+      - .github/workflows/dancers-source-quarry-mailbox.yml
+  workflow_dispatch:
+
+jobs:
+  quarry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Acquire every selected source without license filtering
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sources manifest
+          cat > repos.tsv <<'EOF'
+          MuSkeMo	https://github.com/PashavanBijlert/MuSkeMo.git
+          BlendOsim	https://github.com/JonathanCamargo/BlendOsim.git
+          opensim-core	https://github.com/opensim-org/opensim-core.git
+          human_body_prior	https://github.com/nghorbani/human_body_prior.git
+          smplx	https://github.com/vchoutas/smplx.git
+          EasyMocap	https://github.com/zju3dv/EasyMocap.git
+          skellytracker	https://github.com/freemocap/skellytracker.git
+          mmpose	https://github.com/open-mmlab/mmpose.git
+          motion-diffusion-model	https://github.com/GuyTevet/motion-diffusion-model.git
+          stable-diffusion.cpp	https://github.com/leejet/stable-diffusion.cpp.git
+          meshoptimizer	https://github.com/zeux/meshoptimizer.git
+          EOF
+
+          cat > manifest/source-policy.txt <<'EOF'
+          DANCERS_SOURCE_POLICY/1
+          license_filtering=false
+          bundle_all_selected_sources=true
+          EOF
+
+          : > manifest/sources.tsv
+          while IFS=$'\t' read -r name url; do
+            sha=$(git ls-remote "$url" HEAD | awk '{print $1}')
+            test -n "$sha"
+            base=${url#https://github.com/}; base=${base%.git}
+            out="sources/${name}-${sha}.tar.gz"
+            curl -fL --retry 5 --retry-delay 2 -o "$out" "https://github.com/${base}/archive/${sha}.tar.gz"
+            digest=$(sha256sum "$out" | awk '{print $1}')
+            bytes=$(stat -c%s "$out")
+            printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$sha" "$digest" "$bytes" "$url" >> manifest/sources.tsv
+          done < repos.tsv
+
+          find sources -type f -print0 | sort -z | xargs -0 sha256sum > manifest/source-files.sha256
+          tar -czf dancers-source-quarry.tar.gz sources manifest
+          sha256sum dancers-source-quarry.tar.gz > dancers-source-quarry.tar.gz.sha256
+          printf 'repos=%s\n' "$(wc -l < manifest/sources.tsv)"
+          du -h dancers-source-quarry.tar.gz
+
+      - name: Upload unfiltered source quarry
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-source-quarry
+          path: |
+            dancers-source-quarry.tar.gz
+            dancers-source-quarry.tar.gz.sha256
+          compression-level: 0
+          retention-days: 7
