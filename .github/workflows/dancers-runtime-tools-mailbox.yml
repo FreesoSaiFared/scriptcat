@@ -7,6 +7,7 @@ on:
       - tools/dancers-runtime/danceseq.py
       - tools/dancers-runtime/compile_plan.py
       - tools/dancers-runtime/blender_compile_state.py
+      - tools/dancers-runtime/state_to_openpose.py
       - tools/dancers-runtime/accept_internal_vm.sh
       - tools/dancers-runtime/bootstrap_debian13.sh
       - tools/dancers-runtime/render_cpu_image.sh
@@ -20,16 +21,41 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Verify tools
+      - name: Verify tools and control-image path
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/dancers-runtime/danceseq.py tools/dancers-runtime/compile_plan.py
+          python3 -m py_compile tools/dancers-runtime/danceseq.py tools/dancers-runtime/compile_plan.py tools/dancers-runtime/state_to_openpose.py
           python3 tools/dancers-runtime/test_danceseq.py
           python3 tools/dancers-runtime/test_compile_plan.py
           bash -n tools/dancers-runtime/accept_internal_vm.sh
           bash -n tools/dancers-runtime/bootstrap_debian13.sh
           bash -n tools/dancers-runtime/render_cpu_image.sh
           test -s tools/dancers-runtime/external_assets.tsv
+          cat > /tmp/control.danceseq <<'EOF'
+          DANCESEQ/1
+          bpm 124
+          fps 24
+          duration_frames 96
+          FORM V_SHALLOW
+          F001 ALL pose neutral
+          F024 D1,D5 step inward 0.31m
+          F024 D3 pelvis.z -0.19m
+          F048 ALL pelvis.yaw -18deg
+          F072 ALL root.y -0.24m
+          F096 ALL pose loop_ready
+          CONTACT preserve_support
+          EOF
+          python3 tools/dancers-runtime/compile_plan.py /tmp/control.danceseq -o /tmp/control.state.json
+          python3 tools/dancers-runtime/state_to_openpose.py /tmp/control.state.json -o /tmp/control-openpose.png --frame 48 --receipt /tmp/control-openpose.json
+          test -s /tmp/control-openpose.png
+          python3 - <<'PY'
+          import json
+          r=json.load(open('/tmp/control-openpose.json'))
+          assert r['schema']=='DANCERS_OPENPOSE_CONTROL/1'
+          assert r['actor_count']==5
+          assert len(r['output_sha256'])==64
+          print(json.dumps({'actors':r['actor_count'],'state_frame':r['state_frame'],'sha256':r['output_sha256']},sort_keys=True))
+          PY
       - name: Package airgap toolchain
         shell: bash
         run: |
@@ -38,11 +64,12 @@ jobs:
           cp tools/dancers-runtime/danceseq.py capsule/dancers-runtime/
           cp tools/dancers-runtime/compile_plan.py capsule/dancers-runtime/
           cp tools/dancers-runtime/blender_compile_state.py capsule/dancers-runtime/
+          cp tools/dancers-runtime/state_to_openpose.py capsule/dancers-runtime/
           cp tools/dancers-runtime/accept_internal_vm.sh capsule/dancers-runtime/
           cp tools/dancers-runtime/bootstrap_debian13.sh capsule/dancers-runtime/
           cp tools/dancers-runtime/render_cpu_image.sh capsule/dancers-runtime/
           cp tools/dancers-runtime/external_assets.tsv capsule/dancers-runtime/
-          chmod +x capsule/dancers-runtime/accept_internal_vm.sh capsule/dancers-runtime/bootstrap_debian13.sh capsule/dancers-runtime/render_cpu_image.sh
+          chmod +x capsule/dancers-runtime/accept_internal_vm.sh capsule/dancers-runtime/bootstrap_debian13.sh capsule/dancers-runtime/render_cpu_image.sh capsule/dancers-runtime/state_to_openpose.py
           (cd capsule && find dancers-runtime -type f -print0 | sort -z | xargs -0 sha256sum) > capsule/SHA256SUMS
           tar -C capsule -czf dancers-runtime-tools.tar.gz .
           sha256sum dancers-runtime-tools.tar.gz > dancers-runtime-tools.tar.gz.sha256
