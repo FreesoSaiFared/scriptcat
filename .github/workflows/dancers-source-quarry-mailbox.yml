@@ -12,11 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Acquire every selected source without license filtering
+      - name: Acquire, hash, and split every selected source in one script
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p sources manifest
+          mkdir -p sources manifest chunks
           cat > repos.tsv <<'EOF'
           MuSkeMo	https://github.com/PashavanBijlert/MuSkeMo.git
           BlendOsim	https://github.com/JonathanCamargo/BlendOsim.git
@@ -38,12 +38,13 @@ jobs:
           EOF
 
           cat > manifest/source-policy.txt <<'EOF'
-          DANCERS_SOURCE_POLICY/2
+          DANCERS_SOURCE_POLICY/3
           license_filtering=false
           bundle_all_selected_sources=true
           includes_biomechanics_models=true
           includes_smpl_biomechanics_bridges=true
           includes_mocap_blender_bridge=true
+          transport=350MiB_chunks
           EOF
 
           : > manifest/sources.tsv
@@ -60,16 +61,25 @@ jobs:
 
           find sources -type f -print0 | sort -z | xargs -0 sha256sum > manifest/source-files.sha256
           tar -czf dancers-source-quarry.tar.gz sources manifest
-          sha256sum dancers-source-quarry.tar.gz > dancers-source-quarry.tar.gz.sha256
+          sha256sum dancers-source-quarry.tar.gz > manifest/quarry.sha256
+          split -b 350M -d -a 2 dancers-source-quarry.tar.gz chunks/quarry.part-
+          sha256sum chunks/* > manifest/chunks.sha256
+          stat -c '%n\t%s' chunks/* > manifest/chunks.bytes.tsv
           printf 'repos=%s\n' "$(wc -l < manifest/sources.tsv)"
-          du -h dancers-source-quarry.tar.gz
+          du -h dancers-source-quarry.tar.gz chunks/*
 
-      - name: Upload unfiltered source quarry
+      - name: Upload quarry chunk 00
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-source-quarry-00, path: chunks/quarry.part-00, compression-level: 0, retention-days: 7}
+      - name: Upload quarry chunk 01
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-source-quarry-01, path: chunks/quarry.part-01, compression-level: 0, retention-days: 7}
+      - name: Upload quarry chunk 02
+        uses: actions/upload-artifact@v4
+        with: {name: dancers-source-quarry-02, path: chunks/quarry.part-02, compression-level: 0, retention-days: 7}
+      - name: Upload quarry manifest
         uses: actions/upload-artifact@v4
         with:
-          name: dancers-source-quarry
-          path: |
-            dancers-source-quarry.tar.gz
-            dancers-source-quarry.tar.gz.sha256
-          compression-level: 0
+          name: dancers-source-quarry-manifest
+          path: manifest/
           retention-days: 7
