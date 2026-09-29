@@ -5,6 +5,9 @@ on:
       - chatgpt/dancers-runtime-mailbox-20260929
     paths:
       - .github/workflows/dancers-runtime-accept-ci.yml
+      - tools/dancers-runtime/danceseq.py
+      - tools/dancers-runtime/compile_plan.py
+      - tools/dancers-runtime/blender_compile_state.py
   workflow_dispatch:
 
 jobs:
@@ -12,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
       - name: Acquire pinned portable executables
         shell: bash
         run: |
@@ -36,7 +42,7 @@ jobs:
           unzip -q "runtime/${GLTFPACK_FILE}" -d runtime/gltfpack
           chmod +x runtime/gltfpack/gltfpack || true
 
-      - name: Write DANCESEQ and deterministic Blender compiler
+      - name: Compile canonical DANCESEQ into deterministic state
         shell: bash
         run: |
           set -euo pipefail
@@ -56,210 +62,39 @@ jobs:
           F096 ALL pose loop_ready
           CONTACT preserve_support
           EOF
-
-          cat > out/build_scene.py <<'PY'
-          import bpy, math, json, os, time, traceback, addon_utils
-          from mathutils import Vector
-
-          OUT = os.path.abspath('out')
-          os.makedirs(OUT, exist_ok=True)
-          bpy.ops.wm.read_factory_settings(use_empty=False)
-          bpy.ops.object.select_all(action='SELECT')
-          bpy.ops.object.delete(use_global=False)
-          scene = bpy.context.scene
-          if scene.world is None:
-              scene.world = bpy.data.worlds.new('DancersWorld')
-
-          engine_probe={}
-          try:
-              loaded = addon_utils.enable('cycles', default_set=False, persistent=False)
-              engine_probe['cycles_enable_result'] = bool(loaded)
-          except Exception as e:
-              engine_probe['cycles_enable_error'] = repr(e)
-
-          scene.frame_start = 1
-          scene.frame_end = 96
-          scene.render.resolution_x = 512
-          scene.render.resolution_y = 512
-          scene.render.resolution_percentage = 100
-          scene.render.image_settings.file_format = 'PNG'
-          scene.render.film_transparent = False
-          scene.world.color = (0.015, 0.018, 0.028)
-          try:
-              scene.eevee.taa_render_samples = 8
-          except Exception as e:
-              engine_probe['eevee_sample_tune'] = repr(e)
-
-          def mat(name, rgba, metallic=0.0, rough=0.45):
-              m = bpy.data.materials.new(name)
-              m.diffuse_color = rgba
-              m.use_nodes = True
-              bsdf = m.node_tree.nodes.get('Principled BSDF')
-              if bsdf:
-                  bsdf.inputs['Base Color'].default_value = rgba
-                  bsdf.inputs['Metallic'].default_value = metallic
-                  bsdf.inputs['Roughness'].default_value = rough
-              return m
-
-          mats = [
-              mat('D1',(0.95,0.18,0.40,1)), mat('D2',(0.20,0.70,1.0,1)),
-              mat('D3',(0.98,0.72,0.12,1)), mat('D4',(0.55,0.25,1.0,1)),
-              mat('D5',(0.18,0.95,0.68,1))
-          ]
-          skin = mat('skin',(0.74,0.46,0.34,1),0.0,0.6)
-          groundmat = mat('ground',(0.035,0.04,0.055,1),0.25,0.38)
-
-          def cube(name, loc, scale, material, parent=None):
-              bpy.ops.mesh.primitive_cube_add(location=loc)
-              o=bpy.context.object; o.name=name; o.scale=scale
-              bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-              o.data.materials.append(material)
-              if parent: o.parent=parent
-              return o
-
-          def sphere(name, loc, radius, material, parent=None):
-              bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=radius, location=loc)
-              o=bpy.context.object; o.name=name; o.data.materials.append(material)
-              if parent: o.parent=parent
-              return o
-
-          def limb(name, loc, radius, depth, material, parent=None, rot=(0,0,0)):
-              bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=radius, depth=depth, location=loc, rotation=rot)
-              o=bpy.context.object; o.name=name; o.data.materials.append(material)
-              if parent: o.parent=parent
-              return o
-
-          starts=[(-2.6,1.2,0),(-1.25,0.55,0),(0,0,0),(1.25,0.55,0),(2.6,1.2,0)]
-          roots=[]
-          for i,(x,y,z) in enumerate(starts,1):
-              root=bpy.data.objects.new(f'D{i}_ROOT',None); scene.collection.objects.link(root)
-              root.location=(x,y,z); roots.append(root)
-              cube(f'D{i}_torso',(0,0,1.55),(0.26,0.17,0.48),mats[i-1],root)
-              cube(f'D{i}_pelvis',(0,0,0.95),(0.29,0.20,0.20),mats[i-1],root)
-              sphere(f'D{i}_head',(0,0,2.28),0.23,skin,root)
-              limb(f'D{i}_legL',(-0.15,0,0.48),0.085,0.86,mats[i-1],root)
-              limb(f'D{i}_legR',(0.15,0,0.48),0.085,0.86,mats[i-1],root)
-              limb(f'D{i}_armL',(-0.45,0,1.55),0.065,0.75,mats[i-1],root,rot=(0,math.radians(72),0))
-              limb(f'D{i}_armR', (0.45,0,1.55),0.065,0.75,mats[i-1],root,rot=(0,math.radians(108),0))
-
-          def key(root, frame, loc=None, yaw=None, scale_z=None):
-              scene.frame_set(frame)
-              if loc is not None: root.location=loc
-              if yaw is not None: root.rotation_euler[2]=math.radians(yaw)
-              if scale_z is not None: root.scale[2]=scale_z
-              root.keyframe_insert('location'); root.keyframe_insert('rotation_euler'); root.keyframe_insert('scale')
-
-          for idx,root in enumerate(roots):
-              x,y,z=starts[idx]
-              key(root,1,(x,y,z),0,1)
-              inward = 0.31 if idx in (0,4) else 0.0
-              x2=x + inward*(1 if x<0 else -1 if x>0 else 0)
-              z2=-0.19 if idx==2 else 0
-              key(root,24,(x2,y,z2),0,0.92 if idx==2 else 1)
-              key(root,48,(x2,y,z2),-18,1)
-              key(root,72,(x2,y-0.24,z2+0.17),-8,1)
-              key(root,96,(x,y,z),0,1)
-
-          for obj in scene.objects:
-              if obj.animation_data and obj.animation_data.action:
-                  for fc in obj.animation_data.action.fcurves:
-                      for kp in fc.keyframe_points:
-                          kp.interpolation='BEZIER'
-
-          bpy.ops.mesh.primitive_plane_add(size=30, location=(0,0,-0.02))
-          ground=bpy.context.object; ground.name='GROUND'; ground.data.materials.append(groundmat)
-
-          bpy.ops.object.light_add(type='AREA', location=(0,-2,7)); keylight=bpy.context.object
-          keylight.data.energy=1300; keylight.data.shape='DISK'; keylight.data.size=7
-          bpy.ops.object.light_add(type='AREA', location=(4,3,4)); fill=bpy.context.object
-          fill.data.energy=750; fill.data.size=5
-          bpy.ops.object.light_add(type='AREA', location=(-4,2,3)); rim=bpy.context.object
-          rim.data.energy=900; rim.data.size=4
-
-          bpy.ops.object.camera_add(location=(0,-12.8,4.9))
-          cam=bpy.context.object; scene.camera=cam; cam.data.lens=52
-          target=Vector((0,0.4,1.25)); cam.rotation_euler=(target-cam.location).to_track_quat('-Z','Y').to_euler()
-
-          blend_path=os.path.join(OUT,'five-dancer.blend')
-          bpy.ops.wm.save_as_mainfile(filepath=blend_path)
-          render_results=[]
-
-          try:
-              enum_items=scene.render.bl_rna.properties['engine'].enum_items
-              available={e.identifier for e in enum_items}
-          except Exception:
-              available=set()
-
-          def resolve_engine(candidates):
-              errors={}
-              for cand in candidates:
-                  try:
-                      scene.render.engine=cand
-                      return cand, errors
-                  except Exception as e:
-                      errors[cand]=repr(e)
-              return None, errors
-
-          def render_case(label, candidates, samples=None):
-              engine, set_errors=resolve_engine(candidates)
-              rec={'label':label,'engine':engine,'set_errors':set_errors,'status':'skipped' if not engine else 'pending'}
-              if not engine:
-                  render_results.append(rec); return
-              try:
-                  if engine=='CYCLES':
-                      scene.cycles.device='CPU'; scene.cycles.samples=samples or 8; scene.cycles.use_denoising=False
-                  if engine.startswith('BLENDER_EEVEE'):
-                      try: scene.eevee.taa_render_samples=8
-                      except Exception: pass
-                  scene.frame_set(48)
-                  path=os.path.join(OUT,f'{label}.png'); scene.render.filepath=path
-                  t=time.perf_counter(); bpy.ops.render.render(write_still=True); rec['seconds']=round(time.perf_counter()-t,4)
-                  rec['status']='ok'; rec['path']=path
-              except Exception as e:
-                  rec['status']='error'; rec['error']=repr(e); rec['traceback']=traceback.format_exc()[-3000:]
-              render_results.append(rec)
-
-          render_case('workbench',['BLENDER_WORKBENCH_NEXT','BLENDER_WORKBENCH'])
-          render_case('eevee',['BLENDER_EEVEE_NEXT','BLENDER_EEVEE'])
-          render_case('cycles_cpu',['CYCLES'],8)
-
-          scene.frame_set(1)
-          raw_glb=os.path.join(OUT,'five-dancer-raw.glb')
-          export_rec={'status':'pending','path':raw_glb}
-          try:
-              t=time.perf_counter()
-              bpy.ops.export_scene.gltf(filepath=raw_glb, export_format='GLB', export_animations=True, export_force_sampling=True)
-              export_rec.update(status='ok',seconds=round(time.perf_counter()-t,4))
-          except Exception as e:
-              export_rec.update(status='error',error=repr(e),traceback=traceback.format_exc()[-3000:])
-
-          with open(os.path.join(OUT,'blender-receipt.json'),'w',encoding='utf-8') as f:
-              json.dump({'blender':bpy.app.version_string,'enum_engines':sorted(available),'engine_probe':engine_probe,'renders':render_results,'glb_export':export_rec},f,indent=2)
+          python3 tools/dancers-runtime/danceseq.py out/five-dancer.danceseq -o out/five-dancer.plan.json
+          python3 tools/dancers-runtime/compile_plan.py out/five-dancer.danceseq -o out/five-dancer.state.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('out/five-dancer.plan.json'))
+          s=json.load(open('out/five-dancer.state.json'))
+          assert p['schema']=='DANCESEQ/1' and p['stats']['event_count']==8
+          assert s['schema']=='DANCESTATE/1' and s['valid'] is True and s['actor_count']==5
+          print(json.dumps({'events':p['stats']['event_count'],'state_frames':len(s['frames']),'diagnostics':s['diagnostics']},sort_keys=True))
           PY
 
-      - name: Execute Blender CPU benchmark and export
+      - name: Execute Blender from DANCESTATE and export
         shell: bash
         run: |
           set -euo pipefail
           BLENDER=$(find runtime -maxdepth 3 -type f -name blender -perm -111 | head -n1)
           test -n "$BLENDER"
           "$BLENDER" --version | tee out/blender-version.txt
-          if command -v xvfb-run >/dev/null 2>&1; then
-            xvfb-run -a "$BLENDER" -b --python out/build_scene.py
-          else
-            "$BLENDER" -b --python out/build_scene.py
-          fi
+          CMD=("$BLENDER" -b --python tools/dancers-runtime/blender_compile_state.py -- --state "$PWD/out/five-dancer.state.json" --out "$PWD/out" --preview-frame 48)
+          if command -v xvfb-run >/dev/null 2>&1; then xvfb-run -a "${CMD[@]}"; else "${CMD[@]}"; fi
           test -s out/blender-receipt.json
+          test -s out/five-dancer.blend
+          test -s out/five-dancer-raw.glb
 
       - name: Compress GLB and probe CPU diffusion binary
         shell: bash
         run: |
           set -euo pipefail
           GLTFPACK=$(find runtime/gltfpack -type f -name gltfpack -perm -111 | head -n1 || true)
-          if [[ -n "$GLTFPACK" && -f out/five-dancer-raw.glb ]]; then
-            "$GLTFPACK" -i out/five-dancer-raw.glb -o out/five-dancer-packed.glb -cc > out/gltfpack.txt 2>&1 || \
+          test -n "$GLTFPACK"
+          "$GLTFPACK" -i out/five-dancer-raw.glb -o out/five-dancer-packed.glb -cc > out/gltfpack.txt 2>&1 || \
             "$GLTFPACK" -i out/five-dancer-raw.glb -o out/five-dancer-packed.glb > out/gltfpack.txt 2>&1
-          fi
+          test -s out/five-dancer-packed.glb
 
           SD_BIN=$(find runtime/sd -type f -perm -111 \( -name 'sd-cli' -o -name 'sd' \) | head -n1 || true)
           if [[ -z "$SD_BIN" ]]; then SD_BIN=$(find runtime/sd -type f -perm -111 | head -n1 || true); fi
@@ -272,14 +107,16 @@ jobs:
           cat /proc/meminfo > out/meminfo.txt
           uname -a > out/uname.txt
 
-      - name: Build machine-readable acceptance receipt
+      - name: Build machine-readable end-to-end receipt
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, hashlib, os, platform, pathlib
           out=pathlib.Path('out')
-          with open(out/'blender-receipt.json',encoding='utf-8') as f: r=json.load(f)
+          r=json.load(open(out/'blender-receipt.json'))
+          state=json.load(open(out/'five-dancer.state.json'))
+          plan=json.load(open(out/'five-dancer.plan.json'))
           def digest(p):
               h=hashlib.sha256()
               with open(p,'rb') as f:
@@ -289,27 +126,33 @@ jobs:
           for p in sorted(out.iterdir()):
               if p.is_file() and p.name not in {'ACCEPTANCE_RECEIPT.json','sha256sums.txt'}:
                   files[p.name]={'bytes':p.stat().st_size,'sha256':digest(p)}
-          r['schema']='DANCERS_RUNTIME_ACCEPTANCE/1'
-          r['host']={'platform':platform.platform(),'machine':platform.machine(),'processor':platform.processor(),'cpu_count':os.cpu_count()}
-          r['artifacts']=files
-          r['sd_probe']={
-              'binary':(out/'sd-binary.txt').read_text(errors='replace').strip() if (out/'sd-binary.txt').exists() else '',
-              'help_captured':(out/'sd-help.txt').exists(),
-              'model_downloaded':False
-          }
           ok={x.get('label'):x.get('status')=='ok' for x in r.get('renders',[])}
-          r['acceptance']={
+          acc={
+              'danceseq_parsed':plan.get('schema')=='DANCESEQ/1',
+              'state_compiled':state.get('schema')=='DANCESTATE/1' and state.get('valid') is True,
+              'state_consumed_by_blender':r.get('schema')=='BLENDER_DANCESTATE_RECEIPT/1' and r.get('source_state_sha256')==digest(out/'five-dancer.state.json'),
               'blend_created':(out/'five-dancer.blend').exists(),
               'raw_glb_created':(out/'five-dancer-raw.glb').exists(),
               'packed_glb_created':(out/'five-dancer-packed.glb').exists(),
               'workbench_ok':ok.get('workbench',False),
               'eevee_ok':ok.get('eevee',False),
-              'cycles_cpu_ok':ok.get('cycles_cpu',False)
+              'cycles_cpu_ok':ok.get('cycles_cpu',False),
           }
-          r['acceptance']['render_matrix_complete']=all([r['acceptance']['workbench_ok'],r['acceptance']['eevee_ok'],r['acceptance']['cycles_cpu_ok']])
-          r['acceptance']['pass_core']=all([r['acceptance']['blend_created'],r['acceptance']['raw_glb_created'],r['acceptance']['packed_glb_created'],r['acceptance']['cycles_cpu_ok']])
-          with open(out/'ACCEPTANCE_RECEIPT.json','w',encoding='utf-8') as f: json.dump(r,f,indent=2)
-          print(json.dumps(r['acceptance'],indent=2))
+          acc['render_matrix_complete']=all(acc[k] for k in ('workbench_ok','eevee_ok','cycles_cpu_ok'))
+          acc['pass_core']=all(acc[k] for k in ('danceseq_parsed','state_compiled','state_consumed_by_blender','blend_created','raw_glb_created','packed_glb_created','cycles_cpu_ok'))
+          final={
+              'schema':'DANCERS_RUNTIME_ACCEPTANCE/2',
+              'host':{'platform':platform.platform(),'machine':platform.machine(),'processor':platform.processor(),'cpu_count':os.cpu_count()},
+              'semantic':{'event_count':plan['stats']['event_count'],'state_frames':len(state['frames']),'diagnostics':state['diagnostics']},
+              'blender':r,
+              'sd_probe':{'binary':(out/'sd-binary.txt').read_text(errors='replace').strip(),'help_captured':(out/'sd-help.txt').exists(),'model_downloaded':False},
+              'artifacts':files,
+              'acceptance':acc,
+          }
+          json.dump(final,open(out/'ACCEPTANCE_RECEIPT.json','w'),indent=2)
+          print(json.dumps(acc,indent=2))
+          if not acc['pass_core']:
+              raise SystemExit('core acceptance failed')
           PY
           sha256sum out/* > out/sha256sums.txt
           cat out/ACCEPTANCE_RECEIPT.json
@@ -318,6 +161,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dancers-runtime-acceptance
+          name: dancers-runtime-acceptance-v2
           path: out/
           retention-days: 7
