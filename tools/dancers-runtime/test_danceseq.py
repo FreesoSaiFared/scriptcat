@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("danceseq", HERE / "danceseq.py")
 danceseq = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = danceseq
 assert SPEC.loader is not None
 SPEC.loader.exec_module(danceseq)
 
