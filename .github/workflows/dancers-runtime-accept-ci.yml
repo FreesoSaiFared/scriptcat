@@ -58,15 +58,25 @@ jobs:
           EOF
 
           cat > out/build_scene.py <<'PY'
-          import bpy, math, json, os, time, traceback
+          import bpy, math, json, os, time, traceback, addon_utils
           from mathutils import Vector
 
           OUT = os.path.abspath('out')
           os.makedirs(OUT, exist_ok=True)
-          bpy.ops.wm.read_factory_settings(use_empty=True)
+          bpy.ops.wm.read_factory_settings(use_empty=False)
+          bpy.ops.object.select_all(action='SELECT')
+          bpy.ops.object.delete(use_global=False)
           scene = bpy.context.scene
           if scene.world is None:
               scene.world = bpy.data.worlds.new('DancersWorld')
+
+          engine_probe={}
+          try:
+              loaded = addon_utils.enable('cycles', default_set=False, persistent=False)
+              engine_probe['cycles_enable_result'] = bool(loaded)
+          except Exception as e:
+              engine_probe['cycles_enable_error'] = repr(e)
+
           scene.frame_start = 1
           scene.frame_end = 96
           scene.render.resolution_x = 512
@@ -75,6 +85,10 @@ jobs:
           scene.render.image_settings.file_format = 'PNG'
           scene.render.film_transparent = False
           scene.world.color = (0.015, 0.018, 0.028)
+          try:
+              scene.eevee.taa_render_samples = 8
+          except Exception as e:
+              engine_probe['eevee_sample_tune'] = repr(e)
 
           def mat(name, rgba, metallic=0.0, rough=0.45):
               m = bpy.data.materials.new(name)
@@ -174,17 +188,29 @@ jobs:
               enum_items=scene.render.bl_rna.properties['engine'].enum_items
               available={e.identifier for e in enum_items}
           except Exception:
-              available={'BLENDER_WORKBENCH','BLENDER_EEVEE_NEXT','CYCLES'}
+              available=set()
+
+          def resolve_engine(candidates):
+              errors={}
+              for cand in candidates:
+                  try:
+                      scene.render.engine=cand
+                      return cand, errors
+                  except Exception as e:
+                      errors[cand]=repr(e)
+              return None, errors
 
           def render_case(label, candidates, samples=None):
-              engine=next((x for x in candidates if x in available),None)
-              rec={'label':label,'engine':engine,'status':'skipped' if not engine else 'pending'}
+              engine, set_errors=resolve_engine(candidates)
+              rec={'label':label,'engine':engine,'set_errors':set_errors,'status':'skipped' if not engine else 'pending'}
               if not engine:
                   render_results.append(rec); return
               try:
-                  scene.render.engine=engine
                   if engine=='CYCLES':
                       scene.cycles.device='CPU'; scene.cycles.samples=samples or 8; scene.cycles.use_denoising=False
+                  if engine.startswith('BLENDER_EEVEE'):
+                      try: scene.eevee.taa_render_samples=8
+                      except Exception: pass
                   scene.frame_set(48)
                   path=os.path.join(OUT,f'{label}.png'); scene.render.filepath=path
                   t=time.perf_counter(); bpy.ops.render.render(write_still=True); rec['seconds']=round(time.perf_counter()-t,4)
@@ -208,7 +234,7 @@ jobs:
               export_rec.update(status='error',error=repr(e),traceback=traceback.format_exc()[-3000:])
 
           with open(os.path.join(OUT,'blender-receipt.json'),'w',encoding='utf-8') as f:
-              json.dump({'blender':bpy.app.version_string,'available_engines':sorted(available),'renders':render_results,'glb_export':export_rec},f,indent=2)
+              json.dump({'blender':bpy.app.version_string,'enum_engines':sorted(available),'engine_probe':engine_probe,'renders':render_results,'glb_export':export_rec},f,indent=2)
           PY
 
       - name: Execute Blender CPU benchmark and export
@@ -271,13 +297,16 @@ jobs:
               'help_captured':(out/'sd-help.txt').exists(),
               'model_downloaded':False
           }
+          ok={x.get('label'):x.get('status')=='ok' for x in r.get('renders',[])}
           r['acceptance']={
               'blend_created':(out/'five-dancer.blend').exists(),
               'raw_glb_created':(out/'five-dancer-raw.glb').exists(),
               'packed_glb_created':(out/'five-dancer-packed.glb').exists(),
-              'at_least_one_render_ok':any(x.get('status')=='ok' for x in r.get('renders',[])),
-              'cycles_cpu_ok':any(x.get('label')=='cycles_cpu' and x.get('status')=='ok' for x in r.get('renders',[]))
+              'workbench_ok':ok.get('workbench',False),
+              'eevee_ok':ok.get('eevee',False),
+              'cycles_cpu_ok':ok.get('cycles_cpu',False)
           }
+          r['acceptance']['render_matrix_complete']=all([r['acceptance']['workbench_ok'],r['acceptance']['eevee_ok'],r['acceptance']['cycles_cpu_ok']])
           r['acceptance']['pass_core']=all([r['acceptance']['blend_created'],r['acceptance']['raw_glb_created'],r['acceptance']['packed_glb_created'],r['acceptance']['cycles_cpu_ok']])
           with open(out/'ACCEPTANCE_RECEIPT.json','w',encoding='utf-8') as f: json.dump(r,f,indent=2)
           print(json.dumps(r['acceptance'],indent=2))
