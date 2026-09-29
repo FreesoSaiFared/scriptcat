@@ -11,6 +11,7 @@ on:
       - tools/dancers-runtime/accept_internal_vm.sh
       - tools/dancers-runtime/bootstrap_debian13.sh
       - tools/dancers-runtime/render_cpu_image.sh
+      - tools/dancers-runtime/run_dancers_runtime.sh
       - tools/dancers-runtime/external_assets.tsv
       - .github/workflows/dancers-runtime-tools-mailbox.yml
   workflow_dispatch:
@@ -30,6 +31,7 @@ jobs:
           bash -n tools/dancers-runtime/accept_internal_vm.sh
           bash -n tools/dancers-runtime/bootstrap_debian13.sh
           bash -n tools/dancers-runtime/render_cpu_image.sh
+          bash -n tools/dancers-runtime/run_dancers_runtime.sh
           test -s tools/dancers-runtime/external_assets.tsv
           cat > /tmp/control.danceseq <<'EOF'
           DANCESEQ/1
@@ -68,8 +70,9 @@ jobs:
           cp tools/dancers-runtime/accept_internal_vm.sh capsule/dancers-runtime/
           cp tools/dancers-runtime/bootstrap_debian13.sh capsule/dancers-runtime/
           cp tools/dancers-runtime/render_cpu_image.sh capsule/dancers-runtime/
+          cp tools/dancers-runtime/run_dancers_runtime.sh capsule/dancers-runtime/
           cp tools/dancers-runtime/external_assets.tsv capsule/dancers-runtime/
-          chmod +x capsule/dancers-runtime/accept_internal_vm.sh capsule/dancers-runtime/bootstrap_debian13.sh capsule/dancers-runtime/render_cpu_image.sh capsule/dancers-runtime/state_to_openpose.py
+          chmod +x capsule/dancers-runtime/accept_internal_vm.sh capsule/dancers-runtime/bootstrap_debian13.sh capsule/dancers-runtime/render_cpu_image.sh capsule/dancers-runtime/run_dancers_runtime.sh capsule/dancers-runtime/state_to_openpose.py
           (cd capsule && find dancers-runtime -type f -print0 | sort -z | xargs -0 sha256sum) > capsule/SHA256SUMS
           tar -C capsule -czf dancers-runtime-tools.tar.gz .
           sha256sum dancers-runtime-tools.tar.gz > dancers-runtime-tools.tar.gz.sha256
