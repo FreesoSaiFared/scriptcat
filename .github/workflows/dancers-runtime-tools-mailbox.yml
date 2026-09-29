@@ -8,6 +8,7 @@ on:
       - tools/dancers-runtime/compile_plan.py
       - tools/dancers-runtime/blender_compile_state.py
       - tools/dancers-runtime/accept_internal_vm.sh
+      - tools/dancers-runtime/bootstrap_debian13.sh
       - .github/workflows/dancers-runtime-tools-mailbox.yml
   workflow_dispatch:
 
@@ -24,6 +25,7 @@ jobs:
           python3 tools/dancers-runtime/test_danceseq.py
           python3 tools/dancers-runtime/test_compile_plan.py
           bash -n tools/dancers-runtime/accept_internal_vm.sh
+          bash -n tools/dancers-runtime/bootstrap_debian13.sh
       - name: Package airgap toolchain
         shell: bash
         run: |
@@ -33,7 +35,8 @@ jobs:
           cp tools/dancers-runtime/compile_plan.py capsule/dancers-runtime/
           cp tools/dancers-runtime/blender_compile_state.py capsule/dancers-runtime/
           cp tools/dancers-runtime/accept_internal_vm.sh capsule/dancers-runtime/
-          chmod +x capsule/dancers-runtime/accept_internal_vm.sh
+          cp tools/dancers-runtime/bootstrap_debian13.sh capsule/dancers-runtime/
+          chmod +x capsule/dancers-runtime/accept_internal_vm.sh capsule/dancers-runtime/bootstrap_debian13.sh
           (cd capsule && find dancers-runtime -type f -print0 | sort -z | xargs -0 sha256sum) > capsule/SHA256SUMS
           tar -C capsule -czf dancers-runtime-tools.tar.gz .
           sha256sum dancers-runtime-tools.tar.gz > dancers-runtime-tools.tar.gz.sha256
