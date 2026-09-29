@@ -1,0 +1,145 @@
+name: dancers-biomechanics-sidecar-ci
+on:
+  push:
+    branches:
+      - chatgpt/dancers-runtime-mailbox-20260929
+    paths:
+      - .github/workflows/dancers-biomechanics-sidecar-ci.yml
+  workflow_dispatch:
+
+jobs:
+  sidecar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Build and verify one unpackable biomechanics sidecar
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p tools out relocated
+          exec > >(tee out/build.log) 2>&1
+
+          echo '== host =='
+          uname -a
+          lscpu | sed -n '1,35p'
+          free -h
+
+          echo '== micromamba =='
+          curl -fL --retry 5 --retry-delay 2 'https://micro.mamba.pm/api/micromamba/linux-64/latest' -o tools/micromamba.tar.bz2
+          tar -xjf tools/micromamba.tar.bz2 -C tools bin/micromamba
+          MM="$PWD/tools/bin/micromamba"
+          chmod +x "$MM"
+          export MAMBA_ROOT_PREFIX="$PWD/mamba-root"
+
+          echo '== create Python 3.11 + OpenSim environment =='
+          set +e
+          "$MM" create -y -p "$PWD/sidecar" -c opensim-org -c conda-forge \
+            python=3.11 opensim=4.6 numpy scipy pip conda-pack
+          rc=$?
+          set -e
+          if [[ $rc -ne 0 ]]; then
+            echo 'OpenSim 4.6 package unavailable/incompatible; falling back to 4.5'
+            rm -rf sidecar
+            "$MM" create -y -p "$PWD/sidecar" -c opensim-org -c conda-forge \
+              python=3.11 opensim=4.5 numpy scipy pip conda-pack
+          fi
+          PY="$PWD/sidecar/bin/python"
+          "$PY" -V
+          "$PY" - <<'PY'
+          import opensim, numpy, scipy
+          print('OpenSim', opensim.GetVersion())
+          print('NumPy', numpy.__version__)
+          print('SciPy', scipy.__version__)
+          PY
+
+          echo '== install CPU pose-prior stack =='
+          "$PY" -m pip install --upgrade pip wheel setuptools
+          # human_body_prior staging currently declares Python 3.11/3.12 and torch >=2.13,<2.14.
+          # Try its declared CPU torch dependency first, then preserve a clear receipt if the public CPU index has moved.
+          set +e
+          "$PY" -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.13,<2.14'
+          torch_rc=$?
+          set -e
+          if [[ $torch_rc -ne 0 ]]; then
+            echo 'Declared torch range was not resolvable from the CPU index; installing newest CPU torch for compatibility probe.'
+            "$PY" -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          fi
+          "$PY" -m pip install 'git+https://github.com/vchoutas/smplx.git@main'
+          set +e
+          "$PY" -m pip install 'git+https://github.com/nghorbani/human_body_prior.git@staging'
+          hbp_rc=$?
+          set -e
+          if [[ $hbp_rc -ne 0 ]]; then
+            echo 'Normal human_body_prior dependency resolution failed; install code without dependency rewriting for import compatibility probe.'
+            "$PY" -m pip install --no-deps 'git+https://github.com/nghorbani/human_body_prior.git@staging'
+          fi
+          "$PY" -m pip check | tee out/pip-check.txt || true
+
+          echo '== functional imports and minimal biomechanics =='
+          "$PY" - <<'PY' | tee out/sidecar-probe.txt
+          import json, sys, platform
+          import numpy as np
+          import torch
+          import smplx
+          import opensim
+          import human_body_prior
+
+          model=opensim.Model()
+          ground=model.getGround()
+          body=opensim.Body('segment', 10.0, opensim.Vec3(0), opensim.Inertia(1))
+          model.addBody(body)
+          j=opensim.PinJoint('joint', ground, opensim.Vec3(0), opensim.Vec3(0), body, opensim.Vec3(0), opensim.Vec3(0))
+          model.addJoint(j)
+          state=model.initSystem()
+          mass=model.getTotalMass(state)
+          rec={
+            'python':sys.version.split()[0],
+            'platform':platform.platform(),
+            'opensim':opensim.GetVersion(),
+            'torch':torch.__version__,
+            'torch_cuda_available':torch.cuda.is_available(),
+            'smplx_module':smplx.__file__,
+            'human_body_prior_module':human_body_prior.__file__,
+            'minimal_model_mass':float(mass),
+          }
+          print(json.dumps(rec,indent=2))
+          open('out/SIDECAR_IMPORT_RECEIPT.json','w').write(json.dumps(rec,indent=2)+'\n')
+          PY
+
+          echo '== pack and relocation-test =='
+          "$PWD/sidecar/bin/conda-pack" -p "$PWD/sidecar" -o "$PWD/out/dancers-biomechanics-py311.tar.gz"
+          tar -xzf out/dancers-biomechanics-py311.tar.gz -C relocated
+          if [[ -x relocated/bin/conda-unpack ]]; then relocated/bin/conda-unpack; fi
+          relocated/bin/python - <<'PY' | tee out/relocated-probe.txt
+          import json, opensim, torch, smplx, human_body_prior
+          print(json.dumps({'opensim':opensim.GetVersion(),'torch':torch.__version__,'smplx':True,'human_body_prior':True},sort_keys=True))
+          PY
+
+          echo '== final receipt =='
+          python3 - <<'PY'
+          import json,hashlib,pathlib,os
+          out=pathlib.Path('out'); p=out/'dancers-biomechanics-py311.tar.gz'
+          h=hashlib.sha256()
+          with p.open('rb') as f:
+            for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
+          probe=json.load(open(out/'SIDECAR_IMPORT_RECEIPT.json'))
+          rec={
+            'schema':'DANCERS_BIOMECHANICS_SIDECAR/1',
+            'archive':{'bytes':p.stat().st_size,'sha256':h.hexdigest()},
+            'probe':probe,
+            'unpack_test':True,
+            'model_weights_included':False,
+          }
+          json.dump(rec,open(out/'SIDECAR_ACCEPTANCE_RECEIPT.json','w'),indent=2)
+          print(json.dumps(rec,indent=2))
+          PY
+          sha256sum out/* > out/sha256sums.txt || true
+
+      - name: Upload sidecar and receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancers-biomechanics-sidecar
+          path: out/
+          retention-days: 7
+          compression-level: 0
