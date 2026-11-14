@@ -38,3 +38,4 @@ jobs:
             BLENDER_ARCHIVE_HEAD.txt
           compression-level: 0
           retention-days: 3
+# 2026-11-14: reproducible restage of previously verified portable Blender for private M050 import test (no private assets).
