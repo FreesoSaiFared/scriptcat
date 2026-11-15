@@ -1,0 +1,58 @@
+name: M075 Registry Dependency Closure
+on:
+  push:
+    branches: [m075-pg17-portable]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  npm-closure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Resolve and install isolated package closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/artifacts
+          cat > build/package.json <<'EOF'
+          {
+            "name": "ai-model-registry-m42",
+            "version": "0.42.0",
+            "private": true,
+            "type": "module",
+            "engines": {"node": ">=22.10"},
+            "dependencies": {
+              "pg": "^8.16.0",
+              "mcp-use": "2.12.4",
+              "zod": "^4.0.0"
+            },
+            "devDependencies": {
+              "@types/node": "^22.0.0",
+              "@types/pg": "^8.11.0",
+              "typescript": "^5.9.0",
+              "@modelcontextprotocol/inspector": "2.11.0"
+            }
+          }
+          EOF
+          cd build
+          npm install --ignore-scripts --no-audit --no-fund --package-lock-only
+          npm ci --ignore-scripts --no-audit --no-fund
+          cp package-lock.json artifacts/package-lock.json
+          sha256sum package-lock.json > artifacts/LOCK_SHA256SUMS.txt
+          tar -czf artifacts/node_modules.tgz node_modules
+          sha256sum artifacts/node_modules.tgz > artifacts/NODE_MODULES_SHA256SUMS.txt
+          node -p "require('pg/package.json').version"
+          node -p "require('mcp-use/package.json').version"
+          node -p "require('zod/package.json').version"
+      - name: Store closure and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: m075-registry-npm-closure
+          path: build/artifacts/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
