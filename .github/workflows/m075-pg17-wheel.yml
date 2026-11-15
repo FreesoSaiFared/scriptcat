@@ -1,0 +1,38 @@
+name: M075 PostgreSQL 17 Portable Wheel Acquisition
+on:
+  push:
+    branches: [m075-pg17-portable]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Retrieve pinned public PostgreSQL 17 wheel and verify SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          python -m pip download --no-deps --only-binary=:all: --dest output 'celerp-postgres==17.10.0'
+          cat > output/SHA256SUMS.txt <<'EOF'
+          ece9e687eb907cca6a384823be2aeb40d357ce1680d1e4fdeddfdd06aacca80d  celerp_postgres-17.10.0-py3-none-manylinux_2_34_x86_64.whl
+          EOF
+          ( cd output && sha256sum --check SHA256SUMS.txt )
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          assert len(list(Path('output').glob('*.whl')))==1
+          print('M075_PINNED_WHEEL_VERIFIED')
+          PY
+      - name: Export portable wheel and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: m075-pg17-wheel
+          path: output/
+          if-no-files-found: error
+          retention-days: 3
