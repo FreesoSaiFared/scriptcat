@@ -1,0 +1,34 @@
+name: M075 Portable Node22 MCP Runtime
+on:
+  push:
+    branches: [m075-pg17-portable]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Package runtime and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          test "$(node -p 'Number(process.versions.node.split(".")[0])')" -eq 22
+          mkdir -p output
+          cp "$(command -v node)" output/node22
+          chmod 755 output/node22
+          (cd output && sha256sum node22 > SHA256SUMS.txt)
+          printf '{"nodeVersion":"%s","platform":"%s","arch":"%s"}\n' "$(node --version)" "$(uname -s)" "$(uname -m)" > output/runtime.json
+          (cd output && tar -czf node22.tgz node22 && rm node22)
+      - name: Upload runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: m075-portable-node22
+          path: output/
+          retention-days: 3
+          if-no-files-found: error
