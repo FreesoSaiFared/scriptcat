@@ -1,0 +1,55 @@
+name: M076 npm bundled-parent provenance
+on:
+  push:
+    branches: [m075-pg17-portable]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  provenance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch upstream archive and verify exact lockfile SRI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output extracted
+          npm pack '@tailwindcss/oxide-wasm32-wasi@4.3.3' --pack-destination output --silent
+          cat > /tmp/verify.js <<'JS'
+          const fs=require('node:fs'),crypto=require('node:crypto'),cp=require('node:child_process'),path=require('node:path');
+          const f=path.resolve('output/oxide-wasm32-wasi-4.3.3.tgz');
+          const bytes=fs.readFileSync(f);
+          const sri='sha512-jx1+rPhY/5Ympkktd656HBWEBLxP7dH06losBLjjf5vgCODXvi9KhtftWcMIwTFIDqBr7cRnQkdLnAG+IOlGvQ==';
+          if('sha512-'+crypto.createHash('sha512').update(bytes).digest('base64')!==sri)throw Error('PARENT_SRI_MISMATCH');
+          fs.writeFileSync('output/parent-sha256.txt',crypto.createHash('sha256').update(bytes).digest('hex')+'  oxide-wasm32-wasi-4.3.3.tgz\n');
+          cp.execFileSync('tar',['-xzf',f,'-C','extracted']);
+          const pkg=JSON.parse(fs.readFileSync('extracted/package/package.json','utf8'));
+          const listing=pkg.bundleDependencies||pkg.bundledDependencies;
+          const required=['@emnapi/core','@emnapi/runtime','@emnapi/wasi-threads','@napi-rs/wasm-runtime','@tybys/wasm-util','tslib'];
+          if(!Array.isArray(listing)||!required.every(x=>listing.includes(x)))throw Error('BUNDLE_DECLARATION_MISSING');
+          const detail=required.map(name=>{
+            const folder=path.join('extracted/package/node_modules',name);
+            const manifest=JSON.parse(fs.readFileSync(path.join(folder,'package.json'),'utf8'));
+            const expected={ '@emnapi/core':'1.11.1','@emnapi/runtime':'1.11.1','@emnapi/wasi-threads':'1.2.2','@napi-rs/wasm-runtime':'1.1.4','@tybys/wasm-util':'0.10.2','tslib':'2.8.1'}[name];
+            if(manifest.name!==name||manifest.version!==expected)throw Error('BUNDLED_NAME_VERSION_MISMATCH:'+name);
+            const walk=(p)=>fs.readdirSync(p,{withFileTypes:true}).flatMap(e=>{const f=path.join(p,e.name);return e.isDirectory()?walk(f):(e.isFile()?[f]:[])}).sort();
+            const entries=walk(folder).map(f=>({path:path.relative(folder,f).split(path.sep).join('/'),sha256:crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')}));
+            return {name,version:expected,file_count:entries.length,files:entries};
+          });
+          const output={source:'https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.3.tgz',sri,parent_sha256:crypto.createHash('sha256').update(bytes).digest('hex'),bundled:detail};
+          fs.writeFileSync('output/bundle_evidence.json',JSON.stringify(output,null,2)+'\n');
+          console.log('M076_PARENT_AND_SIX_BUNDLES_VERIFIED',detail.map(x=>x.name+'@'+x.version).join(','));
+          JS
+          node /tmp/verify.js
+          tar -tzf output/oxide-wasm32-wasi-4.3.3.tgz >/dev/null
+      - name: Preserve independently verifiable evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: m076-bundled-parent-evidence
+          path: output/
+          retention-days: 3
+          if-no-files-found: error
