@@ -1,0 +1,50 @@
+name: M077 Hugging Face pinned redirect provenance headers
+on:
+  push:
+    branches: [m077-real-hf-ingestion]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  header:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Record source-origin redirect headers without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          cat >/tmp/headers.py <<'PY'
+          import urllib.request,urllib.error,json,time
+          repo='InftyAI/tiny-random-gpt2'
+          commit='f938eb87a724ff5014e829c45c14a0248e4b3a22'
+          url=f'https://huggingface.co/{repo}/resolve/{commit}/model.safetensors'
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,req,fp,code,msg,headers,newurl):return None
+          opener=urllib.request.build_opener(NoRedirect())
+          checks=[]
+          for method in ['HEAD','GET']:
+            req=urllib.request.Request(url,method=method,headers={'User-Agent':'Superfluid-M077/1.0'})
+            try:r=opener.open(req,timeout=40)
+            except urllib.error.HTTPError as e:r=e
+            safe=['x-repo-commit','x-linked-etag','x-linked-size','etag','content-length','content-type','location']
+            h={k:r.headers.get(k) for k in safe if k!='location' and r.headers.get(k) is not None}
+            location=r.headers.get('location','')
+            checks.append({'request_url':url,'method':method,'status':r.code,'headers':h,
+              'redirect_host':urllib.parse.urlparse(location).hostname if location else None,
+              'location_credentials_recorded':False})
+            r.close()
+          doc={'source':'Hugging Face public HTTPS origin','observed_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
+             'checks':checks,'note':'No signed redirect Location URL or authorization token stored. Source 3xx origin headers are not final response headers.'}
+          open('output/HF_ORIGIN_HEADERS.json','w').write(json.dumps(doc,indent=2)+'\n')
+          print(json.dumps(doc))
+          PY
+          python /tmp/headers.py
+      - name: Save sanitized source response metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: m077-hf-origin-redirect-headers
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
