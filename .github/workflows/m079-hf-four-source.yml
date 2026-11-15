@@ -1,0 +1,68 @@
+name: M079 authenticated public HF metadata acquisition
+on:
+  push:
+    branches: [m077-real-hf-ingestion]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Acquire exact original HTTPS HF metadata for public models only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          cat > /tmp/m079_hf.py <<'PY'
+          import urllib.request,urllib.error,hashlib,json,re,datetime,pathlib,ssl
+          repos=['Wan-AI/Wan2.1-T2V-1.3B','Lightricks/LTX-Video','InftyAI/tiny-random-gpt2','HunyuanVideo/HunyuanVideo']
+          out=pathlib.Path('output');receipts=[]
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,req,fp,code,msg,headers,newurl):return None
+          opener=urllib.request.build_opener(NoRedirect())
+          for idx,repo in enumerate(repos):
+            endpoint=f'https://huggingface.co/api/models/{repo}?blobs=true'
+            record={'repo_expected':repo,'url':endpoint,'method':'GET','authorization':'none','transport':'HTTPS urllib default certificate verification; no redirects','producer_claim_verified':False,'weight_bytes_verified':False}
+            try:
+              req=urllib.request.Request(endpoint,headers={'User-Agent':'SUPERFLUID-M079-registry-verification/1.0','Accept':'application/json'})
+              with opener.open(req,timeout=50) as resp:
+                body=resp.read(6_000_001)
+                if len(body)>6_000_000: raise ValueError('oversize')
+                status=resp.status;final=resp.url
+                content_type=resp.headers.get('Content-Type','')
+              if status!=200 or final!=endpoint:raise ValueError(f'unsafe_status_url:{status}:{final}')
+              obj=json.loads(body)
+              if obj.get('id')!=repo:raise ValueError('repo_id_mismatch')
+              commit=obj.get('sha')
+              if not isinstance(commit,str) or not re.fullmatch('[a-f0-9]{40}',commit,re.I):raise ValueError('missing_commit')
+              if not isinstance(obj.get('siblings'),list):raise ValueError('missing_siblings')
+              if not content_type.lower().startswith('application/json'):raise ValueError('wrong_content_type')
+              # SHA asserts response body custody, NOT source publisher identity or weight verification.
+              digest=hashlib.sha256(body).hexdigest()
+              raw=f'raw_{idx}.json'
+              out.joinpath(raw).write_bytes(body)
+              card=obj.get('cardData') if isinstance(obj.get('cardData'),dict) else {}
+              record.update({'http_status':status,'source_observed_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                'source_body_file':raw,'response_sha256':digest,'bytes':len(body),'canonical_repo_sha':commit.lower(),
+                'content_type':content_type,'source_siblings_count':len(obj['siblings']),
+                'license_claim':obj.get('license') or card.get('license'),'publisher_ownership':'UNVERIFIED',
+                'model_execution':'NOT_TESTED','response_kind':'SOURCE_METADATA_ONLY','success':True})
+            except Exception as e:
+              record.update({'success':False,'error_type':type(e).__name__,'error':str(e)[:200]})
+            receipts.append(record)
+          out.joinpath('M079_LIVE_HF_RECEIPTS.json').write_text(json.dumps(receipts,indent=2,sort_keys=True)+'\n')
+          out.joinpath('SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in sorted(out.glob('raw_*.json'))))
+          ok=[r for r in receipts if r['success']]
+          print(json.dumps({'successes':len(ok),'results':[{k:x.get(k) for k in ['repo_expected','success','http_status','canonical_repo_sha','source_siblings_count','license_claim','error']} for x in receipts]},indent=2))
+          if len(ok)<3: raise SystemExit('M079_FAILURE_FEWER_THAN_THREE_GENUINE_REPO_RESPONSES')
+          PY
+          python /tmp/m079_hf.py
+          (cd output && sha256sum -c SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m079-hf-real-four-source-metadata
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
