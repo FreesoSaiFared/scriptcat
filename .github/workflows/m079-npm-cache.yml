@@ -1,0 +1,43 @@
+name: M079 isolated npm ci verified dependency cache
+on:
+  push:
+    branches: [m075-pg17-portable]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acquire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve exact M078 lock and freshly install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/work output/cache
+          cat > output/work/package.json <<'EOF'
+          {"name":"ai-model-registry-m42","version":"0.42.0","private":true,"type":"module","engines":{"node":">=22.10"},"dependencies":{"pg":"^8.16.0","mcp-use":"2.12.4","zod":"^4.0.0"},"devDependencies":{"@types/node":"^22.0.0","@types/pg":"^8.11.0","typescript":"^5.9.0","@modelcontextprotocol/inspector":"2.11.0"}}
+          EOF
+          cd output/work
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund --cache ../cache
+          echo "98ea68554cea86ae24245fb4f74c8aa2b858ee201d64698827b6a7e25a5d3c38  package-lock.json" | sha256sum -c
+          npm ci --ignore-scripts --no-audit --no-fund --cache ../cache
+          node -p 'process.version'
+          npm ls --depth=0
+          cd ..
+          printf 'lock_sha256=98ea68554cea86ae24245fb4f74c8aa2b858ee201d64698827b6a7e25a5d3c38\n' > PROVENANCE.txt
+          sha256sum work/package.json work/package-lock.json >> PROVENANCE.txt
+          tar -czf npm-cache.tar.gz cache
+          sha256sum npm-cache.tar.gz >> PROVENANCE.txt
+          rm -rf work cache
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m079-npm-offline-cache-pinned-lock
+          path: |
+            output/npm-cache.tar.gz
+            output/PROVENANCE.txt
+          retention-days: 7
+          if-no-files-found: error
