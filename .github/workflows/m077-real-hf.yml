@@ -1,0 +1,86 @@
+name: M077 real Hugging Face metadata and tiny safetensors acquisition
+on:
+  push:
+    branches: [m077-real-hf-ingestion]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acquire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Acquire one real repository observation and pinned model blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          cat > /tmp/acquire_m077.py <<'PY'
+          import hashlib,json,re,time,urllib.request,struct,pathlib
+          out=pathlib.Path('output')
+          repo='InftyAI/tiny-random-gpt2'
+          expected='8111d5afb0715dbf5a31396d31432cb56370ba23f6650a035ea0fc8a20b4e500'
+          metaurl=f'https://huggingface.co/api/models/{repo}?blobs=true'
+          req=urllib.request.Request(metaurl,headers={'User-Agent':'Superfluid-M077-Evidence/1.0','Accept':'application/json'})
+          with urllib.request.urlopen(req,timeout=45) as r:
+            raw=r.read(2_000_001)
+            assert len(raw)<2_000_001, 'metadata too large'
+            assert r.status==200, 'metadata status'
+            assert r.url==metaurl, 'unexpected metadata redirect'
+            metaheaders=dict(r.headers.items())
+          meta=json.loads(raw)
+          assert meta.get('id')==repo, 'wrong model id'
+          commit=meta.get('sha')
+          assert re.fullmatch('[a-f0-9]{40}',commit,re.I), 'unpinned repo'
+          siblings=meta.get('siblings',[])
+          item=next((x for x in siblings if x.get('rfilename')=='model.safetensors'),None)
+          assert item is not None, 'missing model file'
+          # HF may identify a blob through LFS; do not invent a provider hash if absent.
+          lfs=(item.get('lfs') or {})
+          provider_sha=lfs.get('sha256')
+          if provider_sha is not None:
+            assert provider_sha==expected, 'provider SHA mismatch'
+          url=f'https://huggingface.co/{repo}/resolve/{commit}/model.safetensors'
+          req=urllib.request.Request(url,headers={'User-Agent':'Superfluid-M077-Evidence/1.0'})
+          with urllib.request.urlopen(req,timeout=90) as r:
+            data=r.read(2_000_001)
+            assert len(data)<2_000_001, 'blob too large'
+            assert r.status==200, 'blob download status'
+            redirected=r.url
+            hdr=dict(r.headers.items())
+          actual=hashlib.sha256(data).hexdigest()
+          assert actual==expected, f'actual blob sha mismatch: {actual}'
+          assert data[:8] and len(data)>=8
+          headerlen=struct.unpack('<Q',data[:8])[0]
+          assert 0<headerlen<100000 and 8+headerlen<=len(data), 'invalid safetensors header'
+          header=json.loads(data[8:8+headerlen])
+          tensors={k:v for k,v in header.items() if k!='__metadata__'}
+          assert tensors and all(isinstance(v,dict) and 'data_offsets' in v and 'shape' in v and 'dtype' in v for v in tensors.values()),'bad safetensors records'
+          out.joinpath('hf_model_metadata_original.json').write_bytes(raw)
+          out.joinpath('model.safetensors').write_bytes(data)
+          receipt={'source':'Hugging Face public HTTPS API','repository':repo,'api_url':metaurl,'api_response_sha256':hashlib.sha256(raw).hexdigest(),'repo_commit':commit,
+            'file_path':'model.safetensors','pinned_download_url':url,'actual_download_final_host':urllib.parse.urlparse(redirected).hostname,
+            'expected_sha256_from_public_hf_file_page':expected,'provider_claimed_lfs_sha256':provider_sha,'verified_model_sha256':actual,
+            'file_size_bytes':len(data),'safetensors_tensor_count':len(tensors),
+            'safetensors_header_sha256':hashlib.sha256(data[8:8+headerlen]).hexdigest(),
+            'observed_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
+            'metadata_license_claim':meta.get('license') or (meta.get('cardData') or {}).get('license'),
+            'auth_scope':'public HTTPS; not a cryptographic publisher signature; not inference or production model',
+            'metadata_etag':metaheaders.get('ETag') or metaheaders.get('etag'),
+            'model_file_etag':hdr.get('ETag') or hdr.get('etag')}
+          out.joinpath('source_receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          out.joinpath('SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in sorted(out.iterdir()) if p.is_file()))
+          print('M077_REAL_HF_MODEL_BLOB_VERIFIED',json.dumps({k:receipt[k] for k in ['repository','repo_commit','verified_model_sha256','file_size_bytes','safetensors_tensor_count','metadata_license_claim']}))
+          PY
+          python /tmp/acquire_m077.py
+          (cd output && sha256sum -c SHA256SUMS.txt)
+      - name: Export original source evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: m077-real-hf-model-source
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
