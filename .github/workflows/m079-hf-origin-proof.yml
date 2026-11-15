@@ -1,0 +1,118 @@
+name: M079 bounded Hugging Face origin-to-CDN byte proof
+on:
+  push:
+    branches: [m079-hf-origin-proof]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pin-and-prove:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify immutable source identity, source 302 and final bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          cat > /tmp/hf_chain.py <<'PY'
+          import urllib.request, urllib.error, urllib.parse, ssl, hashlib, json, re, pathlib, datetime
+          out=pathlib.Path('output')
+          repo='InftyAI/tiny-random-gpt2'
+          commit='f938eb87a724ff5014e829c45c14a0248e4b3a22'
+          expected_hash='8111d5afb0715dbf5a31396d31432cb56370ba23f6650a035ea0fc8a20b4e500'
+          expected_size=453864
+          max_bytes=1048576
+          allowed={'us.aws.cdn.hf.co','eu.aws.cdn.hf.co','cdn-lfs.hf.co','cas-bridge.xethub.hf.co','transfer.xethub.hf.co'}
+          original=f'https://huggingface.co/{repo}/resolve/{commit}/model.safetensors'
+          api=f'https://huggingface.co/api/models/{repo}?blobs=true'
+          ctx=ssl.create_default_context()
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,request,fp,code,msg,headers,newurl):return None
+          opener=urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx),NoRedirect())
+          def request(url):
+            req=urllib.request.Request(url,method='GET',headers={'User-Agent':'SUPERFLUID-M079-origin-proof/1.0','Accept-Encoding':'identity'})
+            try:return opener.open(req,timeout=55)
+            except urllib.error.HTTPError as e:return e
+          def validate_destination(value):
+            try:u=urllib.parse.urlsplit(value)
+            except:raise ValueError('INVALID_URL')
+            if u.scheme!='https' or u.hostname not in allowed or u.port not in (None,443) or u.username or u.password or u.fragment:
+              raise ValueError('UNAPPROVED_REDIRECT')
+            return u
+          # Source API is used only for provider metadata claims, not publisher/rights attestation.
+          with request(api) as r:
+            if r.code!=200 or r.geturl()!=api:raise ValueError('INVALID_SOURCE_API_RESPONSE')
+            raw=r.read(2_000_001)
+            if len(raw)>2_000_000:raise ValueError('API_OVERSIZE')
+          metadata=json.loads(raw)
+          if metadata.get('id')!=repo or metadata.get('sha')!=commit:raise ValueError('SOURCE_COMMIT_CHANGED')
+          siblings=[s for s in metadata.get('siblings',[]) if s.get('rfilename')=='model.safetensors']
+          if len(siblings)!=1:raise ValueError('FILE_CLAIM_AMBIGUOUS')
+          sibling=siblings[0]
+          if (sibling.get('lfs') or {}).get('sha256')!=expected_hash or (sibling.get('lfs') or {}).get('size')!=expected_size:
+            raise ValueError('SOURCE_CLAIM_CHANGED')
+          with request(original) as r:
+            status=r.code
+            headers=r.headers
+            if status not in (302,307):raise ValueError('UNEXPECTED_ORIGIN_STATUS')
+            if headers.get('x-repo-commit')!=commit:raise ValueError('ORIGIN_COMMIT_MISMATCH')
+            if headers.get('x-linked-etag')!='"'+expected_hash+'"':raise ValueError('ORIGIN_DIGEST_MISMATCH')
+            if headers.get('x-linked-size')!=str(expected_size):raise ValueError('ORIGIN_SIZE_MISMATCH')
+            location=headers.get('Location')
+          if not location:raise ValueError('MISSING_LOCATION')
+          trace=['hf-origin-redirect-v1',original,status]
+          redirect_hosts=[]
+          terminal=None
+          for hop in range(3):
+            u=validate_destination(location)
+            redirect_hosts.append(u.hostname)
+            trace.extend([u.hostname,hashlib.sha256(location.encode()).hexdigest()])
+            with request(location) as r:
+              resp_status=r.code
+              trace.append(resp_status)
+              if resp_status==200:
+                if r.headers.get('content-encoding') not in (None,'identity'):
+                  raise ValueError('ENCODING_MISMATCH')
+                claim=r.headers.get('Content-Length')
+                if claim is not None and int(claim)!=expected_size:raise ValueError('CDN_LENGTH_MISMATCH')
+                data=r.read(max_bytes+1)
+                if len(data)>max_bytes:raise ValueError('TOO_LARGE')
+                terminal=u
+                break
+              if resp_status not in (302,307) or hop==2:raise ValueError('UNEXPECTED_CDN_REDIRECT')
+              location=r.headers.get('Location')
+              if not location:raise ValueError('CDN_LOCATION_MISSING')
+          if terminal is None:raise ValueError('NO_TERMINAL_RESPONSE')
+          actual=hashlib.sha256(data).hexdigest()
+          if actual!=expected_hash or len(data)!=expected_size:raise ValueError('FINAL_BYTES_MISMATCH')
+          # Do not output or store signed Location values, even inside error records.
+          safe_final=urllib.parse.urlunsplit(('https',terminal.hostname,terminal.path,'',''))
+          record={
+            'schema':'hf-origin-redirect-v1','requestedUrl':original,'finalUrl':safe_final,
+            'status':200,'responseEtag':None,'providerCommit':commit,'sha256':actual,'sizeBytes':len(data),
+            'downloadedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'resumed':False,
+            'originChain':{'kind':'hf-origin-redirect-v1','originStatus':status,
+              'originCommit':commit,'originLinkedSha256':expected_hash,'originLinkedSizeBytes':expected_size,
+              'redirectHosts':redirect_hosts,'redirectTraceSha256':hashlib.sha256(json.dumps(trace,separators=(',',':')).encode()).hexdigest()},
+            'source_api_response_sha256':hashlib.sha256(raw).hexdigest(),
+            'source_identity_accepted':'HF HTTPS pinned origin and source metadata byte-bound, not publisher legal identity',
+            'publisher_ownership':'UNVERIFIED','license_grant':'UNKNOWN',
+            'gpu_admission':'NO'}
+          out.joinpath('model.safetensors').write_bytes(data)
+          out.joinpath('source_api.json').write_bytes(raw)
+          out.joinpath('HF_ORIGIN_TO_CDN_RECEIPT.json').write_text(json.dumps(record,indent=2)+'\n')
+          out.joinpath('SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in sorted(out.iterdir()) if p.name!='SHA256SUMS.txt'))
+          print('LIVE_PINNED_ORIGIN_TO_CDN_BYTES_VERIFIED')
+          print(json.dumps({k:record[k] for k in ['schema','sha256','sizeBytes','providerCommit','finalUrl','publisher_ownership','license_grant','gpu_admission']},sort_keys=True))
+          print('redirect_hops',len(redirect_hosts))
+          PY
+          python /tmp/hf_chain.py
+          (cd output && sha256sum -c SHA256SUMS.txt)
+      - name: Save verified original bytes and SANITIZED provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: m079-hf-origin-cdn-byte-proof
+          path: output/
+          retention-days: 5
+          if-no-files-found: error
