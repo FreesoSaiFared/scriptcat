@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.16.0'
+          node-version: '22'
       - name: Resolve and install isolated package closure
         shell: bash
         run: |
@@ -46,7 +46,7 @@ jobs:
           tar -czf artifacts/node_modules.tgz node_modules
           sha256sum artifacts/node_modules.tgz > artifacts/NODE_MODULES_SHA256SUMS.txt
           node -p "require('pg/package.json').version"
-          node -p "require('mcp-use/package.json').version"
+          node -p "JSON.parse(require('node:fs').readFileSync('node_modules/mcp-use/package.json','utf8')).version"
           node -p "require('zod/package.json').version"
       - name: Store closure and checksums
         uses: actions/upload-artifact@v4
