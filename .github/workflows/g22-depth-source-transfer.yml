@@ -1,0 +1,29 @@
+name: G2.2 official DA-V2 source transfer
+on:
+  push:
+    branches: [research/g22-depth-checkpoint-20261115]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Clone and verify pinned official source
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/DepthAnything/Depth-Anything-V2.git source
+          git -C source checkout --quiet --detach a561b849ebae10a6f5ef49e26c83cbbcd36c71bf
+          test "$(git -C source rev-parse HEAD)" = a561b849ebae10a6f5ef49e26c83cbbcd36c71bf
+          test -z "$(git -C source status --porcelain)"
+          tar --exclude='./source/.git/objects/pack/*.idx' -czf source-pinned.tgz source
+          sha256sum source-pinned.tgz > source-pinned.tgz.sha256
+          cat source-pinned.tgz.sha256
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: g22-official-source-pinned
+          path: |
+            source-pinned.tgz
+            source-pinned.tgz.sha256
+          retention-days: 3
