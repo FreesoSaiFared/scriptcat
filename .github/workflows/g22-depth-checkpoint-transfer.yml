@@ -1,0 +1,62 @@
+name: G2.2 verified DA-V2 checkpoint transfer
+on:
+  push:
+    branches:
+      - research/g22-depth-checkpoint-20261115
+permissions:
+  contents: read
+jobs:
+  verified-transport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch pinned exact model and verify bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p payload
+          URL="https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/a0553a672ad67f58cfb110a5a5c244a167f672bc/depth_anything_v2_vits_fp32.safetensors"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 3 --connect-timeout 20 --max-time 720 "$URL" --output /tmp/g22_depth_vits_fp32.safetensors
+          test "$(stat -c %s /tmp/g22_depth_vits_fp32.safetensors)" -eq 99165460
+          printf '%s  %s\n' "cb2d537ed6e45921f27f61f0b605dcfafb6b97c7d1a15e551280bdd867605c86" "/tmp/g22_depth_vits_fp32.safetensors" | sha256sum --check --status
+          split -b 33554432 -d -a 1 /tmp/g22_depth_vits_fp32.safetensors payload/part_
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          p=pathlib.Path('payload')
+          parts=[dict(name=x.name,size=x.stat().st_size,sha256=hashlib.sha256(x.read_bytes()).hexdigest()) for x in sorted(p.glob('part_*'))]
+          assert len(parts)==3 and [v['size'] for v in parts]==[33554432,33554432,32056596]
+          (p/'manifest.json').write_text(json.dumps(dict(model='Kijai/DepthAnythingV2-safetensors',revision='a0553a672ad67f58cfb110a5a5c244a167f672bc',filename='depth_anything_v2_vits_fp32.safetensors',size=99165460,sha256='cb2d537ed6e45921f27f61f0b605dcfafb6b97c7d1a15e551280bdd867605c86',parts=parts),indent=2)+'\n')
+          print('Verified checkpoint SHA256 and split', len(parts), 'parts')
+          PY
+          rm -f /tmp/g22_depth_vits_fp32.safetensors
+      - name: Upload checkpoint part 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: g22-depth-checkpoint-part-0
+          path: payload/part_0
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: Upload checkpoint part 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: g22-depth-checkpoint-part-1
+          path: payload/part_1
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: Upload checkpoint part 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: g22-depth-checkpoint-part-2
+          path: payload/part_2
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: Upload custody manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: g22-depth-checkpoint-manifest
+          path: payload/manifest.json
+          if-no-files-found: error
+          retention-days: 3
