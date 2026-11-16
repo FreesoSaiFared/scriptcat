@@ -1,0 +1,33 @@
+name: G2.3 pinned official VACE template transport
+on:
+  push:
+    branches: [research/g23-vace-template-20261116]
+permissions:
+  contents: read
+jobs:
+  template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Verify exact source template and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          curl --fail --location --silent --show-error --retry 2 --max-time 60 \
+            https://raw.githubusercontent.com/Comfy-Org/workflow_templates/ff15d86b5a143d546ed632826d72501298563ddb/templates/video_wan_vace_14B_v2v.json \
+            -o artifact/video_wan_vace_14B_v2v.json
+          test "$(git hash-object artifact/video_wan_vace_14B_v2v.json)" = 07be48754103599130d6872085a54266be7fe51a
+          python3 - <<'PY'
+          import json,pathlib,hashlib
+          p=pathlib.Path('artifact/video_wan_vace_14B_v2v.json')
+          data=json.loads(p.read_bytes())
+          assert isinstance(data['nodes'],list) and len(data['nodes'])>=20
+          assert any(n['type']=='WanVaceToVideo' for n in data['nodes'])
+          (p.parent/'SOURCE.json').write_text(json.dumps(dict(url='https://github.com/Comfy-Org/workflow_templates/blob/ff15d86b5a143d546ed632826d72501298563ddb/templates/video_wan_vace_14B_v2v.json',repository_commit='ff15d86b5a143d546ed632826d72501298563ddb',git_blob_sha1='07be48754103599130d6872085a54266be7fe51a',sha256=hashlib.sha256(p.read_bytes()).hexdigest()),indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: g23-vace-official-template
+          path: artifact/
+          retention-days: 3
